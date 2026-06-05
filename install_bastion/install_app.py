@@ -149,6 +149,9 @@ def _auto_assign_bootstrap_ip(env: dict, host_config: dict) -> str:
 
 def init_session_state(cluster_config=None):
     """初始化 Session State"""
+    home_dir = os.path.expanduser("~")
+    install_source_dir = os.path.join(home_dir, "install_source")
+    
     defaults = {
         'current_step': 1,
         'installation_started': False,
@@ -172,13 +175,13 @@ def init_session_state(cluster_config=None):
         },
         # 檔案路徑
         'file_paths': {
-            'mirrorRegistryDir': '/root/mirror-registry.tar.gz',
-            'ocpInstallDir': '/root/openshift-install-linux.tar.gz',
-            'ocpClientDir': '/root/openshift-client-linux.tar.gz',
+            'mirrorRegistryDir': os.path.join(install_source_dir, 'mirror-registry.tar.gz'),
+            'ocpInstallDir': os.path.join(install_source_dir, 'openshift-install-linux.tar.gz'),
+            'ocpClientDir': os.path.join(install_source_dir, 'openshift-client-linux.tar.gz'),
             'quayRoot': '/opt/quay',
             'quayStorage': '/opt/quay-storage',
-            'ocmirrorSource': '/root/oc-mirror.tar.gz',
-            'imageSetFile': '/root/oc-mirror-workspace',
+            'ocmirrorSource': os.path.join(install_source_dir, 'oc-mirror.tar.gz'),
+            'imageSetFile': os.path.join(install_source_dir, 'oc-mirror-workspace'),
             'reponame': 'ocp416',
         },
         # 步驟執行結果
