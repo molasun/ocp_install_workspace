@@ -77,18 +77,48 @@ def _get_default_csi_images(csi_config, default_images_data):
             img_name = img['name'].replace('25.02.1', trident_ver).replace('25.02', trident_major_minor)
             images.append({"name": img_name})
         return images
-    return csi_images_data.get(csi_type, [])
+    
+    # nfs-csi 或其他類型：只保留 name
+    raw_images = csi_images_data.get(csi_type, [])
+    return [{"name": img['name']} for img in raw_images]
 
 def _init_additional_images():
     """合併 base images 與 CSI images 為 additional_images 的初始值"""
     default_data = _load_default_images()
     csi_config = st.session_state.get('csi_config', {'CSI_TYPE': 'none'})
+    
     base = default_data.get('base_images', [])
     csi = _get_default_csi_images(csi_config, default_data)
-    all_images = base.copy()
+    
+    # 初始化計數器（如果還沒有）
+    if 'image_counter' not in st.session_state:
+        st.session_state.image_counter = 0
+    
+    all_images = []
+    seen_names = set()  # 用於去重
+    
+    # 處理 base images
+    for img in base:
+        img_name = img.get('name', '')
+        if img_name and img_name not in seen_names:
+            st.session_state.image_counter += 1
+            all_images.append({
+                "name": img_name,
+                "id": f"img_{st.session_state.image_counter}"
+            })
+            seen_names.add(img_name)
+    
+    # 處理 CSI images
     for img in csi:
-        if img not in all_images:
-            all_images.append(img)
+        img_name = img.get('name', '')
+        if img_name and img_name not in seen_names:
+            st.session_state.image_counter += 1
+            all_images.append({
+                "name": img_name,
+                "id": f"img_{st.session_state.image_counter}"
+            })
+            seen_names.add(img_name)
+    
     st.session_state.additional_images = all_images
 
 def _render_csi_config():
@@ -244,26 +274,47 @@ def _render_additional_images_section():
     st.subheader("📦 Additional Images")
     st.markdown("這些鏡像將被包含在 `imageset-config.yaml` 中進行 mirror。您可以新增或刪除額外的鏡像。")
     
-    images_to_remove = []
+    # 初始化計數器
+    if 'image_counter' not in st.session_state:
+        st.session_state.image_counter = 0
+    
+    # 為沒有 ID 的 image 分配 ID
+    for img in st.session_state.additional_images:
+        if 'id' not in img:
+            st.session_state.image_counter += 1
+            img['id'] = f"img_{st.session_state.image_counter}"
+    
+    # 顯示現有 images
     for i, img in enumerate(st.session_state.additional_images):
+        img_id = img.get('id', f'img_{i}')
         c1, c2, c3 = st.columns([5, 1, 1])
         with c1:
-            new_name = st.text_input(f"Image {i+1}", value=img['name'], key=f"add_img_{i}", label_visibility="collapsed")
-            st.session_state.additional_images[i]['name'] = new_name
+            new_name = st.text_input(
+                f"Image {i+1}", 
+                value=img.get('name', ''), 
+                key=f"add_img_{img_id}",
+                label_visibility="collapsed"
+            )
+            img['name'] = new_name
         with c2:
             st.caption(f"#{i+1}")
         with c3:
-            if st.button("🗑️", key=f"del_img_{i}"):
-                images_to_remove.append(i)
+            if st.button("🗑️", key=f"del_img_{img_id}"):
+                st.session_state.additional_images = [
+                    item for item in st.session_state.additional_images 
+                    if item.get('id') != img_id
+                ]
+                st.rerun()
     
-    for idx in sorted(images_to_remove, reverse=True):
-        st.session_state.additional_images.pop(idx)
-        st.rerun()
-    
+    # 新增按鈕
     col_add, _ = st.columns([1, 4])
     with col_add:
         if st.button("➕ Add Image", use_container_width=True):
-            st.session_state.additional_images.append({"name": ""})
+            st.session_state.image_counter += 1
+            st.session_state.additional_images.append({
+                "name": "", 
+                "id": f"img_{st.session_state.image_counter}"
+            })
             st.rerun()
 
 def _render_save_and_preview():
