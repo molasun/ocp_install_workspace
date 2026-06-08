@@ -79,7 +79,7 @@ class ToolConfigUI:
         """渲染 Pull Secret 說明"""
         st.markdown("""
         請提供 OpenShift Pull Secret。
-        從 [Red Hat Console](https://console.redhat.com/openshift/downloads#tool-pull-secret) 下載。
+        從 [Red Hat Console](https://console.redhat.com/openshift/install/pull-secret) 下載。
         """)
     
     def _get_pull_secret_input(self) -> Optional[dict]:

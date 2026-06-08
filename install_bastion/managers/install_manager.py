@@ -8,6 +8,12 @@ class InstallManager(BaseManager):
     
     # 基礎套件列表
     BASE_PACKAGES = ['net-tools', 'git', 'httpd']
+
+    @property
+    def _install_source_dir(self) -> str:
+        """取得 install_source 目錄路徑"""
+        home_dir = os.path.expanduser("~")
+        return os.path.join(home_dir, "install_source")
     
     def install_packages(self, packages: List[str] = None) -> Tuple[bool, str]:
         """安裝基礎套件 - 對應 packages.yml"""
@@ -48,12 +54,31 @@ class InstallManager(BaseManager):
         )
         self._run_command("systemctl restart httpd")
         self._run_command("systemctl enable httpd")
-    
+
+    def _get_tar_path(self, config_key: str, default_filename: str) -> str:
+        """
+        取得 tar 包的完整路徑
+        優先使用 config 中的路徑，如果不存在則使用 ~/install_source/ 下的預設路徑
+        """
+        configured_path = self.config.get(config_key, '')
+        if configured_path and os.path.exists(configured_path):
+            return configured_path
+        
+        # 使用 ~/install_source 下的預設路徑
+        default_path = os.path.join(self._install_source_dir, default_filename)
+        if os.path.exists(default_path):
+            return default_path
+        
+        # 如果都不存在，返回 config 中的路徑（讓後續邏輯報錯）
+        return configured_path or default_path
+
     def install_openshift_install_cli(self) -> Tuple[bool, str]:
         """安裝 openshift-install CLI"""
         self._log("安裝 openshift-install CLI...")
         
-        ocp_install_dir = self.config.get('ocpInstallDir', '/root/openshift-install-linux.tar.gz')
+        ocp_install_dir = self._get_tar_path('ocpInstallDir', 'openshift-install-linux.tar.gz')
+        self._log(f"使用安裝包: {ocp_install_dir}")
+        
         target_path = '/usr/bin/openshift-install'
         
         # 檢查是否已安裝
@@ -64,7 +89,13 @@ class InstallManager(BaseManager):
         
         # 檢查安裝包
         if not os.path.exists(ocp_install_dir):
-            return False, f"找不到 openshift-install 安裝包: {ocp_install_dir}"
+            # 嘗試在 install_source 目錄中搜尋
+            found = self._search_tar_in_install_source('openshift-install')
+            if found:
+                ocp_install_dir = found
+                self._log(f"在 install_source 中找到: {ocp_install_dir}")
+            else:
+                return False, f"找不到 openshift-install 安裝包: {ocp_install_dir}"
         
         # 解壓安裝
         success, stdout, err = self._run_command(f"tar -xzf {ocp_install_dir} -C /usr/bin/")
@@ -74,7 +105,6 @@ class InstallManager(BaseManager):
         # 檢查解壓後是否有 openshift-install，如果名稱不同則重新命名
         if not os.path.exists(target_path):
             # 列出解壓的檔案
-            success, stdout, _ = self._run_command(f"tar -tzf {ocp_install_dir}")
             if success:
                 files = stdout.strip().split('\n')
                 for f in files:
@@ -97,7 +127,10 @@ class InstallManager(BaseManager):
         """安裝 oc 客戶端 CLI"""
         self._log("安裝 oc 客戶端 CLI...")
         
-        ocp_client_dir = self.config.get('ocpClientDir', '/root/openshift-client-linux.tar.gz')
+        # 使用輔助方法取得 tar 路徑
+        ocp_client_dir = self._get_tar_path('ocpClientDir', 'openshift-client-linux.tar.gz')
+        self._log(f"使用安裝包: {ocp_client_dir}")
+        
         target_path = '/usr/bin/oc'
         
         # 檢查是否已安裝
@@ -108,7 +141,13 @@ class InstallManager(BaseManager):
         
         # 檢查安裝包
         if not os.path.exists(ocp_client_dir):
-            return False, f"找不到 oc client 安裝包: {ocp_client_dir}"
+            # 嘗試在 install_source 目錄中搜尋
+            found = self._search_tar_in_install_source('openshift-client')
+            if found:
+                ocp_client_dir = found
+                self._log(f"在 install_source 中找到: {ocp_client_dir}")
+            else:
+                return False, f"找不到 oc client 安裝包: {ocp_client_dir}"
         
         # 解壓安裝（oc client 通常包含 oc 和 kubectl）
         success, stdout, err = self._run_command(f"tar -xzf {ocp_client_dir} -C /usr/bin/")
@@ -125,7 +164,18 @@ class InstallManager(BaseManager):
         self._setup_bash_completion()
         
         return True, "oc client 安裝成功"
-    
+
+    def _search_tar_in_install_source(self, pattern: str) -> str:
+        """在 install_source 目錄中搜尋匹配的 tar 檔案"""
+        if not os.path.exists(self._install_source_dir):
+            return None
+        
+        for filename in os.listdir(self._install_source_dir):
+            if pattern in filename and filename.endswith('.tar.gz'):
+                return os.path.join(self._install_source_dir, filename)
+        
+        return None
+
     def _setup_bash_completion(self) -> None:
         """設定 oc 命令的 bash completion"""
         target_path = '/usr/bin/oc'
@@ -168,7 +218,6 @@ class InstallManager(BaseManager):
         self._log("驗證安裝...")
         
         checks = []
-        all_ok = True
         
         # 檢查 openshift-install
         if os.path.exists('/usr/bin/openshift-install'):
@@ -191,4 +240,4 @@ class InstallManager(BaseManager):
         else:
             checks.append("⚠️ podman 未安裝")
         
-        return all_ok, "\n".join(checks)
+        return True, "\n".join(checks)

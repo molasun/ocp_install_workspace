@@ -12,6 +12,10 @@ def render_step3_cli_packages():
     # 直接從 session_state 取得所需資料（避免宣告未使用的變數）
     file_paths = st.session_state.get('file_paths', {})
     install_options = st.session_state.get('install_options', {})
+
+    # 取得 home 目錄和 install_source 路徑
+    home_dir = os.path.expanduser("~")
+    install_source_dir = os.path.join(home_dir, "install_source")
     
     # === 檔案路徑配置 ===
     st.subheader("📁 安裝包路徑確認")
@@ -22,19 +26,19 @@ def render_step3_cli_packages():
     with col_path1:
         ocp_install_dir = st.text_input(
             "OCP 安裝 CLI 路徑 (openshift-install)",
-            value=file_paths.get('ocpInstallDir', '/root/openshift-install-linux.tar.gz'),
+            value=file_paths.get('ocpInstallDir', os.path.join(install_source_dir, 'openshift-install-linux.tar.gz')),
             help="openshift-install 安裝包的 tar.gz 檔案路徑"
         )
         ocp_client_dir = st.text_input(
             "OCP 客戶端 CLI 路徑 (oc)",
-            value=file_paths.get('ocpClientDir', '/root/openshift-client-linux.tar.gz'),
+            value=file_paths.get('ocpClientDir', os.path.join(install_source_dir, 'openshift-client-linux.tar.gz')),
             help="oc 客戶端的 tar.gz 檔案路徑"
         )
         
     with col_path2:
         mirror_registry_dir = st.text_input(
             "Mirror Registry 安裝包路徑",
-            value=file_paths.get('mirrorRegistryDir', '/root/mirror-registry.tar.gz'),
+            value=file_paths.get('mirrorRegistryDir', os.path.join(install_source_dir, 'mirror-registry.tar.gz')),
             help="mirror-registry 安裝包的 tar.gz 檔案路徑"
         )
     

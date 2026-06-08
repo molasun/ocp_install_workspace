@@ -62,10 +62,19 @@ class MirrorRegistryManager(BaseManager):
         cluster_name = self.config.get('clusterName', 'ocp4')
         base_domain = self.config.get('baseDomain', 'example.com')
         bastion_fqdn = f"{bastion_name}.{cluster_name}.{base_domain}"
+
+        home_dir = os.path.expanduser("~")
+        install_source_dir = os.path.join(home_dir, "install_source")
         
-        # 檢查安裝包是否存在
+        mirror_registry_dir = self.config.get('mirrorRegistryDir', 
+            os.path.join(install_source_dir, 'mirror-registry.tar.gz'))
+
+        # 如果 config 中的路徑不存在，嘗試在 install_source 中搜尋
         if not os.path.exists(mirror_registry_dir):
-            return False, f"找不到 Mirror Registry 安裝包: {mirror_registry_dir}"
+            found = self._search_in_install_source('mirror-registry')
+            if found:
+                mirror_registry_dir = found
+                self._log(f"在 install_source 中找到: {mirror_registry_dir}")
         
         # 解壓安裝包
         self._log(f"解壓 {mirror_registry_dir}...")
@@ -91,7 +100,21 @@ class MirrorRegistryManager(BaseManager):
             return True, "Mirror Registry 安裝成功"
         else:
             return False, f"Mirror Registry 安裝失敗: {stderr}"
-    
+
+    def _search_in_install_source(self, pattern: str) -> str:
+        """在 install_source 目錄中搜尋匹配的檔案"""
+        home_dir = os.path.expanduser("~")
+        install_source_dir = os.path.join(home_dir, "install_source")
+        
+        if not os.path.exists(install_source_dir):
+            return None
+        
+        for filename in os.listdir(install_source_dir):
+            if pattern in filename and filename.endswith('.tar.gz'):
+                return os.path.join(install_source_dir, filename)
+        
+        return None
+
     def _trust_ca(self, quay_root: str) -> bool:
         """信任 Mirror Registry 的 CA 憑證"""
         ca_path = f"{quay_root}/quay-rootCA/rootCA.pem"
