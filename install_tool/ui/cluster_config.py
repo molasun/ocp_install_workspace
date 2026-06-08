@@ -26,15 +26,20 @@ def show_cluster_config_page():
 
 def _init_state(config):
     """初始化 session state 中的節點計數與網路預設值"""
+    install_env = config.get('install_env', {})
+
     if 'master_count' not in st.session_state:
         st.session_state.master_count = max(1, sum(
-            1 for k in config['install_env'] if k.startswith('MASTER') and k.endswith('_IP')))
+            1 for k in install_env 
+            if k.startswith('MASTER') and k.endswith('_IP')))
     if 'infra_count' not in st.session_state:
         st.session_state.infra_count = sum(
-            1 for k in config['install_env'] if k.startswith('INFRA') and k.endswith('_IP'))
+            1 for k in install_env 
+            if k.startswith('INFRA') and k.endswith('_IP'))
     if 'worker_count' not in st.session_state:
         st.session_state.worker_count = sum(
-            1 for k in config['install_env'] if k.startswith('WORKER') and k.endswith('_IP'))
+            1 for k in install_env 
+            if k.startswith('WORKER') and k.endswith('_IP'))
     
     if st.session_state.master_count < 1:
         st.session_state.master_count = 1
