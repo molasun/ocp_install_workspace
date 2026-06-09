@@ -48,12 +48,19 @@ class SetupWizard:
     )
     URL_GRPCURL = "https://github.com/fullstorydev/grpcurl/releases/download/v1.9.3/grpcurl_1.9.3_linux_x86_64.tar.gz"
     URL_TRIDENT = "https://github.com/NetApp/trident/releases/download/v{ver}/trident-installer-{ver}.tar.gz"
-    
+
+    URL_COREOS_ISO_BASE = (
+        "https://mirror.openshift.com/pub/openshift-v4/x86_64/dependencies/rhcos/"
+        "{version}/latest/"
+    )
+    COREOS_ISO_FILENAME_TEMPLATE = "rhcos-{version}-x86_64-live-iso.x86_64.iso"
+
     DEFAULT_GRPCURL_VERSION = "1.9.3" 
     DIR_INSTALL_SOURCE = "install_source"
     DIR_INSTALL_OCP = "install/ocp"
     DIR_DOCKER = ".docker"
     DIR_MIRROR = "mirror"
+    DIR_COREOS_ISO = "install_source/coreos"
 
     def __init__(self, current_dir: Optional[str] = None):
         """初始化基礎目錄結構與子模組"""
@@ -141,7 +148,8 @@ class SetupWizard:
             self.install_source_dir,
             self.docker_config_dir,
             self.install_ocp_dir,
-            os.path.join(self.install_source_dir, self.DIR_MIRROR)
+            os.path.join(self.install_source_dir, self.DIR_MIRROR),
+            os.path.join(self.current_dir, self.DIR_COREOS_ISO),
         ]
         
         for dir_path in dirs_to_create:
@@ -171,10 +179,16 @@ class SetupWizard:
         downloads = self._build_download_list(config)
         tracker = ProgressTracker(len(downloads), progress_callback)
         
-        os.makedirs(self.install_source_dir, exist_ok=True)
-        
-        for url, filename in downloads:
-            if not self._download_if_not_exists(url, filename):
+        for item in downloads:
+            if len(item) == 3:
+                url, filename, dest_dir = item
+            else:
+                url, filename = item
+                dest_dir = self.install_source_dir
+            
+            os.makedirs(dest_dir, exist_ok=True)
+            
+            if not self._download_if_not_exists(url, filename, dest_dir):
                 return False
             tracker.step()
         
@@ -203,6 +217,10 @@ class SetupWizard:
             (self.URL_MIRROR_REGISTRY.format(**params), f"mirror-registry-{params['arch']}.tar.gz"),
             (self.URL_GRPCURL, f"grpcurl_{self.DEFAULT_GRPCURL_VERSION}_linux_x86_64.tar.gz"),
         ]
+
+        coreos_download = self._build_coreos_download(v_info)
+        if coreos_download:
+            downloads.append(coreos_download)
         
         # 條件性添加 Trident
         if csi_info.get('CSI_TYPE') == "trident":
@@ -214,16 +232,118 @@ class SetupWizard:
         
         return downloads
     
-    def _download_if_not_exists(self, url: str, filename: str) -> bool:
+    def _download_if_not_exists(self, url: str, filename: str, dest_dir: str = None) -> bool:
         """如果檔案不存在則下載"""
-        dest_path = os.path.join(self.install_source_dir, filename)
+        if dest_dir is None:
+            dest_dir = self.install_source_dir
+        
+        dest_path = os.path.join(dest_dir, filename)
         
         if os.path.exists(dest_path):
-            log_info(f"文件已存在，跳過下載：{filename}")
-            return True
+            file_size = os.path.getsize(dest_path)
+            if file_size > 0:
+                log_info(f"文件已存在，跳過下載：{filename} ({file_size / (1024*1024):.1f} MB)")
+                return True
+            else:
+                log_info(f"文件存在但為空，重新下載：{filename}")
         
-        return self.download_file(url, self.install_source_dir)
-    
+        return self.download_file(url, dest_dir)
+
+    def _build_coreos_download(self, v_info: dict) -> Optional[tuple]:
+        """
+        構建 CoreOS ISO 下載資訊
+        
+        從 OCP_RELEASE 解析主版本號（如 4.21.8 -> 4.21），
+        並從 mirror 頁面查找最新的 CoreOS 版本號
+        
+        Returns:
+            (url, filename, destination_dir) 或 None
+        """
+        ocp_release = v_info.get('OCP_RELEASE', '')
+        
+        # 解析 OCP 主版本號
+        match = re.match(r'(\d+\.\d+)', ocp_release)
+        if not match:
+            log_info(f"無法解析 OCP 版本以獲取 CoreOS ISO: {ocp_release}")
+            return None
+        
+        ocp_major_version = match.group(1)
+        
+        # 構建 CoreOS mirror URL
+        base_url = self.URL_COREOS_ISO_BASE.format(version=ocp_major_version)
+        
+        # 取得最新的 CoreOS 版本號
+        coreos_version = self._get_latest_coreos_version(base_url, ocp_major_version)
+        if not coreos_version:
+            log_error(f"無法取得 CoreOS {ocp_major_version} 的版本資訊")
+            return None
+        
+        # 構建完整下載 URL 和檔名
+        iso_url = base_url + self.COREOS_ISO_FILENAME_TEMPLATE.format(version=coreos_version)
+        iso_filename = self.COREOS_ISO_FILENAME_TEMPLATE.format(version=coreos_version)
+        
+        # CoreOS ISO 存放到專用目錄
+        dest_dir = os.path.join(self.current_dir, self.DIR_COREOS_ISO)
+        
+        log_info(f"CoreOS ISO: {iso_filename}")
+        return (iso_url, iso_filename, dest_dir)
+
+    def _get_latest_coreos_version(self, base_url: str, ocp_major_version: str) -> Optional[str]:
+        """
+        從 mirror 頁面取得最新的 CoreOS 版本號
+        
+        Args:
+            base_url: CoreOS ISO 基礎 URL
+            ocp_major_version: OCP 主版本號（如 '4.21'），用於備用
+            
+        Returns:
+            版本號字串（如 '4.21.0'）或 None
+        """
+        try:
+            # 使用 curl 取得目錄列表
+            result = subprocess.run(
+                ['curl', '-s', '-L', '--connect-timeout', '15', '--max-time', '30', base_url],
+                capture_output=True, text=True, timeout=30
+            )
+            
+            if result.returncode != 0:
+                # 嘗試使用 wget
+                result = subprocess.run(
+                    ['wget', '-q', '-O', '-', '--timeout=30', base_url],
+                    capture_output=True, text=True, timeout=30
+                )
+            
+            if result.returncode != 0 or not result.stdout.strip():
+                log_error(f"無法存取 CoreOS mirror: {base_url}")
+                # 使用備用版本號
+                fallback = f"{ocp_major_version}.0"
+                log_info(f"使用備用 CoreOS 版本: {fallback}")
+                return fallback
+            
+            html_content = result.stdout
+            
+            # 從 HTML 中提取 ISO 檔名中的版本號
+            # 匹配格式: rhcos-4.21.0-x86_64-live-iso.x86_64.iso
+            pattern = r'rhcos-(\d+\.\d+\.\d+)-x86_64-live-iso\.x86_64\.iso'
+            match = re.search(pattern, html_content)
+            
+            if match:
+                version = match.group(1)
+                log_info(f"找到 CoreOS 版本: {version}")
+                return version
+            
+            # 備用方案：使用 OCP 主版本號 + .0
+            fallback = f"{ocp_major_version}.0"
+            log_info(f"無法從 mirror 解析版本，使用備用: {fallback}")
+            return fallback
+            
+        except subprocess.TimeoutExpired:
+            log_error(f"取得 CoreOS 版本資訊超時: {base_url}")
+            return f"{ocp_major_version}.0"
+        except Exception as e:
+            log_error(f"取得 CoreOS 版本資訊失敗: {e}")
+            return f"{ocp_major_version}.0"
+
     def download_file(self, url: str, destination_dir: str) -> bool:
         """使用 wget 下載檔案"""
         url = url.strip().replace(" ", "")
