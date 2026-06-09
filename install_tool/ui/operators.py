@@ -334,10 +334,11 @@ def _render_save_and_preview():
         with open(ops_path, 'w') as f:
             json.dump(list(st.session_state.temp_operator_configs.values()), f, indent=2)
     
-    # 儲存 additional_images.json
+    # 儲存 additional_images.json - 過濾掉 id 欄位
     add_img_path = os.path.join(CONFIG_DIR, 'additional_images.json')
+    clean_images = [{"name": img["name"]} for img in st.session_state.additional_images if img.get("name", "").strip()]
     with open(add_img_path, 'w') as f:
-        json.dump(st.session_state.additional_images, f, indent=2)
+        json.dump(clean_images, f, indent=2)
     
     # 生成 imageset-config.yaml
     try:

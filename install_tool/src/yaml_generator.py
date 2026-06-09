@@ -170,15 +170,9 @@ class YAMLGenerator:
     def generate_imageset_config(self):
         """生成 imageset-config.yaml"""
         operators = _load_json(os.path.join(self.config_dir, 'operators.json')) or []
-        images = _load_json(os.path.join(self.config_dir, 'additional_images.json'))
-        if images is None:
-            data = _load_json(os.path.join(self.config_dir, "default_images.json"))
-            images = data.get('base_images', []) if data else []
         
-        # 合併 CSI images
-        for img in self._get_csi_images():
-            if img not in images:
-                images.append(img)
+        # 優先讀取 additional_images.json，如果不存在則從 default_images.json 建立
+        images = self._load_additional_images()
         
         ocp = self.v_info.get('OCP_RELEASE', '4.20.8')
         major_minor = ocp.rsplit('.', 1)[0]
@@ -188,13 +182,59 @@ class YAMLGenerator:
             "kind": "ImageSetConfiguration",
             "archiveSize": 5,
             "mirror": {
-                "platform": {"channels": [{"name": f"stable-{major_minor}", "minVersion": ocp, "maxVersion": ocp}], "graph": True},
+                "platform": {
+                    "channels": [{
+                        "name": f"stable-{major_minor}",
+                        "minVersion": ocp,
+                        "maxVersion": ocp
+                    }],
+                    "graph": True
+                },
                 "operators": self._build_operator_blocks(operators),
                 "additionalImages": images
             }
         }
         return yaml.dump(config, sort_keys=False, allow_unicode=True)
-    
+
+    def _load_additional_images(self) -> list:
+        """
+        載入 additional images
+        
+        優先順序：
+        1. additional_images.json（使用者自訂）
+        2. default_images.json 的 base_images + csi_images
+        """
+        # 嘗試讀取使用者自訂的 additional_images.json
+        user_images = _load_json(os.path.join(self.config_dir, 'additional_images.json'))
+        if user_images is not None:
+            # 確保只保留 name 欄位
+            return [{"name": img["name"]} for img in user_images if img.get("name", "").strip()]
+        
+        # Fallback: 從 default_images.json 建立
+        data = _load_json(os.path.join(self.config_dir, "default_images.json"))
+        if not data:
+            return []
+        
+        # 合併 base_images 和 csi_images
+        images = []
+        seen = set()
+        
+        # 添加 base_images
+        for img in data.get('base_images', []):
+            name = img.get('name', '')
+            if name and name not in seen:
+                images.append({"name": name})
+                seen.add(name)
+        
+        # 添加 CSI images
+        for img in self._get_csi_images():
+            name = img.get('name', '')
+            if name and name not in seen:
+                images.append({"name": name})
+                seen.add(name)
+        
+        return images
+
     def _build_operator_blocks(self, operators):
         """構建 operators 區塊"""
         if not operators:
@@ -325,10 +365,18 @@ class YAMLGenerator:
             return []
         
         csi_type = self.csi_info.get('CSI_TYPE', 'none')
-        images = data.get('csi_images', {}).get(csi_type, [])
+        if csi_type == 'none':
+            return []
+        
+        csi_images = data.get('csi_images', {}).get(csi_type, [])
         
         if csi_type == 'trident':
             ver = self.csi_info.get('TRIDENT_INSTALLER', '25.02.1')
             major_minor = ver.rsplit('.', 1)[0] if '.' in ver else ver
-            return [{"name": img['name'].replace('25.02.1', ver).replace('25.02', major_minor)} for img in images]
-        return images
+            return [
+                {"name": img['name'].replace('25.02.1', ver).replace('25.02', major_minor)}
+                for img in csi_images
+            ]
+        
+        # nfs-csi 或其他類型
+        return [{"name": img['name']} for img in csi_images]
