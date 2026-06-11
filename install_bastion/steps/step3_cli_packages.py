@@ -3,6 +3,7 @@ import time
 import os
 import subprocess
 from setup_manager import SetupManager
+from managers.base_manager import BaseManager 
 
 
 def render_step3_cli_packages():
@@ -14,10 +15,11 @@ def render_step3_cli_packages():
     install_options = st.session_state.get('install_options', {})
 
     # 取得 home 目錄和 install_source 路徑
-    home_dir = os.path.expanduser("~")
-    install_source_dir = os.path.join(home_dir, "install_source")
+    home_dir = BaseManager._get_real_home()
+    install_source_dir = BaseManager._get_install_source_dir()
     
     # === 檔案路徑配置 ===
+    st.caption(f"📁 安裝來源目錄: `{install_source_dir}`")
     st.subheader("📁 安裝包路徑確認")
     st.markdown("請確認以下安裝包的路徑是否正確，必要時可修改：")
     

@@ -7,25 +7,46 @@ from datetime import datetime
 
 class BaseManager:
     """基礎管理類別，提供共用功能"""
+
+    _ROOT_REQUIRED_PREFIXES = [
+        'yum', 'dnf', 'rpm',
+        'systemctl', 'service',
+        'setenforce', 'semanage',
+        'firewall-cmd', 'iptables',
+        'nmcli',
+    ]
     
-    def __init__(self, config: Dict[str, Any], config_dir: str = "/tmp/ocp-install-config"):
-        """
-        初始化基礎管理器
-        
-        Args:
-            config: 配置參數字典
-            config_dir: 配置目錄路徑
-        """
+    def __init__(self, config: dict, config_dir: str = "/tmp/ocp-install-config"):
         self.config = config
         self.config_dir = config_dir
         self.logs = []
-        
-        # 建立配置目錄
         os.makedirs(self.config_dir, exist_ok=True)
-        
-        # 初始化 logger
         self._init_logger()
-    
+
+    @staticmethod
+    def _get_real_home() -> str:
+        """
+        取得實際使用者的家目錄
+        
+        即使以 sudo/root 執行，也返回原始使用者的家目錄
+        """
+        # 方法1: 透過 SUDO_USER 環境變數
+        sudo_user = os.environ.get('SUDO_USER', '')
+        if sudo_user:
+            return os.path.join('/home', sudo_user)
+        
+        # 方法2: 如果目前使用者不是 root，直接使用 ~
+        if os.geteuid() != 0:
+            return os.path.expanduser("~")
+        
+        # 方法3: root 但沒有 SUDO_USER（少見情況），使用 /root
+        return os.path.expanduser("~")
+
+    @staticmethod
+    def _get_install_source_dir() -> str:
+        """取得 install_source 目錄路徑"""
+        return os.path.join(BaseManager._get_real_home(), "install_source")
+
     def _init_logger(self):
         """初始化日誌"""
         self.log_file = os.path.join(
@@ -48,18 +69,13 @@ class BaseManager:
         
         print(log_entry)
     
-    def _run_command(self, command: str, shell: bool = True, timeout: int = 300) -> Tuple[bool, str, str]:
-        """
-        執行系統命令
-        
-        Args:
-            command: 要執行的命令
-            shell: 是否使用 shell 執行
-            timeout: 超時時間（秒）
-            
-        Returns:
-            (success, stdout, stderr)
-        """
+    def _run_command(
+        self, 
+        command: str, 
+        shell: bool = True, 
+        timeout: int = 300
+    ) -> Tuple[bool, str, str]:
+        """執行系統命令"""
         try:
             self._log(f"執行命令: {command}")
             

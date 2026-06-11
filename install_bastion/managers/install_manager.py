@@ -12,8 +12,7 @@ class InstallManager(BaseManager):
     @property
     def _install_source_dir(self) -> str:
         """取得 install_source 目錄路徑"""
-        home_dir = os.path.expanduser("~")
-        return os.path.join(home_dir, "install_source")
+        return self._get_install_source_dir() 
     
     def install_packages(self, packages: List[str] = None) -> Tuple[bool, str]:
         """安裝基礎套件 - 對應 packages.yml"""
