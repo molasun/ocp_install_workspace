@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import sys
 import os
 import json
@@ -12,6 +13,17 @@ from steps.step4_mirror import render_step4_mirror
 
 from managers.base_manager import BaseManager
 
+
+def scroll_to_top():
+    """滾動到頁面頂部"""
+    components.html(
+        """
+        <script>
+            window.parent.document.querySelector('section.main').scrollTo(0, 0);
+        </script>
+        """,
+        height=0,
+    )
 
 def load_cluster_config():
     """載入 cluster_config.json 配置檔"""
@@ -112,7 +124,6 @@ def parse_host_config(config_data: dict) -> dict:
     
     return host_config
 
-
 def _parse_nodes(env: dict, prefix: str, default_interface: str, default_device: str) -> list:
     """解析節點配置"""
     nodes = []
@@ -132,7 +143,6 @@ def _parse_nodes(env: dict, prefix: str, default_interface: str, default_device:
         else:
             break
     return nodes
-
 
 def _auto_assign_bootstrap_ip(env: dict, host_config: dict) -> str:
     """自動分配 Bootstrap IP"""
@@ -199,7 +209,6 @@ def init_session_state(cluster_config=None):
         if key not in st.session_state:
             st.session_state[key] = value
 
-
 def display_sidebar_progress():
     """側邊欄顯示進度"""
     with st.sidebar:
@@ -222,7 +231,6 @@ def display_sidebar_progress():
                 st.info(f"🔄 {step_name}")
             else:
                 st.text(f"⬜ {step_name}")
-
 
 def display_config_summary():
     """顯示載入的配置摘要"""
@@ -251,7 +259,6 @@ def display_config_summary():
                     st.markdown("**網路配置**")
                     if 'networkType' in net:
                         st.text(f"類型: {net['networkType']}")
-
 
 def main():
     """主入口函數"""
@@ -302,6 +309,8 @@ def main():
             st.session_state.original_config = original_config
             st.session_state.config_params = original_config
             st.rerun()
+
+    scroll_to_top()
 
 
 if __name__ == "__main__":

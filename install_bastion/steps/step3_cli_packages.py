@@ -201,6 +201,9 @@ def render_step3_cli_packages():
                     break
             if result.get('success', False):
                 st.success(f"{task_name}: {result.get('message', '')}")
+                # Registry 安裝成功後的額外提示
+                if method == 'setup_registry':
+                    st.info("🔐 Mirror Registry 已可使用，請在步驟4進行鏡像同步")
             else:
                 st.error(f"{task_name}: {result.get('message', '')}")
         

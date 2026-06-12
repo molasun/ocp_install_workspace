@@ -1,4 +1,5 @@
 import os
+import time
 from typing import Dict, Tuple
 from .base_manager import BaseManager
 
@@ -50,7 +51,11 @@ class MirrorRegistryManager(BaseManager):
         installed, msg = self.check_installed()
         if installed:
             self._log(msg)
-            return True, msg
+            # 已安裝時也驗證連線
+            verify_success, verify_msg = self.verify_connection()
+            if verify_success:
+                return True, f"Mirror Registry 已安裝並驗證成功 - {verify_msg}"
+            return True, f"Mirror Registry 已安裝，但連線驗證失敗: {verify_msg}"
         
         # 取得安裝參數
         mirror_registry_dir = self.config.get('mirrorRegistryDir', '/root/mirror-registry.tar.gz')
@@ -97,7 +102,14 @@ class MirrorRegistryManager(BaseManager):
         if success:
             # 信任 CA 憑證
             self._trust_ca(quay_root)
-            return True, "Mirror Registry 安裝成功"
+            
+            # 安裝後驗證連線
+            time.sleep(3)  # 等待服務完全啟動
+            verify_success, verify_msg = self.verify_connection()
+            if verify_success:
+                return True, f"Mirror Registry 安裝成功並驗證通過 - {verify_msg}"
+            else:
+                return True, f"Mirror Registry 安裝成功，但連線驗證失敗: {verify_msg}"
         else:
             return False, f"Mirror Registry 安裝失敗: {stderr}"
 
