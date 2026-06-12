@@ -12,8 +12,7 @@ class InstallManager(BaseManager):
     @property
     def _install_source_dir(self) -> str:
         """取得 install_source 目錄路徑"""
-        home_dir = os.path.expanduser("~")
-        return os.path.join(home_dir, "install_source")
+        return self._get_install_source_dir() 
     
     def install_packages(self, packages: List[str] = None) -> Tuple[bool, str]:
         """安裝基礎套件 - 對應 packages.yml"""
@@ -96,42 +95,48 @@ class InstallManager(BaseManager):
                 self._log(f"在 install_source 中找到: {ocp_install_dir}")
             else:
                 return False, f"找不到 openshift-install 安裝包: {ocp_install_dir}"
+
+        # === 先列出 tar 內容，確認解壓後會有哪些檔案 ===
+        success, tar_content, _ = self._run_command(f"tar -tzf {ocp_install_dir}")
+        if not success:
+            return False, f"無法讀取 tar 檔案內容: {ocp_install_dir}"
         
+        # 解析 tar 中的檔案列表
+        tar_files = [f.strip() for f in tar_content.split('\n') if f.strip() and not f.strip().endswith('/')]
+        self._log(f"tar 包含 {len(tar_files)} 個檔案")
+
         # 解壓安裝
-        success, stdout, err = self._run_command(f"tar -xzf {ocp_install_dir} -C /usr/bin/")
+        success, _, err = self._run_command(f"tar -xzf {ocp_install_dir} -C /usr/bin/")
         if not success:
             return False, f"解壓 openshift-install 失敗: {err}"
-        
-        # 檢查解壓後是否有 openshift-install，如果名稱不同則重新命名
-        if not os.path.exists(target_path):
-            # 列出解壓的檔案
-            if success:
-                files = stdout.strip().split('\n')
-                for f in files:
-                    f = f.strip()
-                    if f and not f.endswith('/'):
-                        extracted_file = f"/usr/bin/{f}"
-                        if os.path.exists(extracted_file) and f != 'openshift-install':
-                            self._run_command(f"mv {extracted_file} {target_path}")
-                            break
-        
-        # 設定權限
-        self._run_command(f"chmod +x {target_path}")
-        
+
+        # === 檢查解壓結果 ===
         if os.path.exists(target_path):
+            self._run_command(f"chmod +x {target_path}")
             return True, "openshift-install 安裝成功"
-        else:
-            return False, "openshift-install 安裝後無法找到執行檔"
-    
+
+        # 檢查解壓後是否有 openshift-install，如果名稱不同則重新命名
+        for f in tar_files:
+            extracted_file = f"/usr/bin/{f}"
+            if os.path.exists(extracted_file):
+                self._log(f"重新命名 {extracted_file} -> {target_path}")
+                self._run_command(f"mv {extracted_file} {target_path}")
+                self._run_command(f"chmod +x {target_path}")
+                
+                if os.path.exists(target_path):
+                    return True, "openshift-install 安裝成功"
+        
+        return False, f"openshift-install 安裝後無法找到執行檔，tar 內容: {tar_files}"
+   
     def install_oc_client(self) -> Tuple[bool, str]:
         """安裝 oc 客戶端 CLI"""
         self._log("安裝 oc 客戶端 CLI...")
         
-        # 使用輔助方法取得 tar 路徑
         ocp_client_dir = self._get_tar_path('ocpClientDir', 'openshift-client-linux.tar.gz')
         self._log(f"使用安裝包: {ocp_client_dir}")
         
         target_path = '/usr/bin/oc'
+        kubectl_path = '/usr/bin/kubectl'
         
         # 檢查是否已安裝
         if os.path.exists(target_path):
@@ -141,7 +146,6 @@ class InstallManager(BaseManager):
         
         # 檢查安裝包
         if not os.path.exists(ocp_client_dir):
-            # 嘗試在 install_source 目錄中搜尋
             found = self._search_tar_in_install_source('openshift-client')
             if found:
                 ocp_client_dir = found
@@ -149,21 +153,32 @@ class InstallManager(BaseManager):
             else:
                 return False, f"找不到 oc client 安裝包: {ocp_client_dir}"
         
-        # 解壓安裝（oc client 通常包含 oc 和 kubectl）
-        success, stdout, err = self._run_command(f"tar -xzf {ocp_client_dir} -C /usr/bin/")
+        # === 先列出 tar 內容 ===
+        success, tar_content, _ = self._run_command(f"tar -tzf {ocp_client_dir}")
+        if not success:
+            return False, f"無法讀取 tar 檔案內容"
+        
+        # === 解壓安裝 ===
+        success, _, err = self._run_command(f"tar -xzf {ocp_client_dir} -C /usr/bin/")
         if not success:
             return False, f"解壓 oc client 失敗: {err}"
         
-        # 設定權限
+        # === 檢查並設定權限 ===
+        installed = []
         if os.path.exists(target_path):
             self._run_command(f"chmod +x {target_path}")
-        else:
+            installed.append("oc")
+        if os.path.exists(kubectl_path):
+            self._run_command(f"chmod +x {kubectl_path}")
+            installed.append("kubectl")
+        
+        if not installed:
             return False, "oc client 安裝後無法找到執行檔"
         
         # 設定 bash completion
         self._setup_bash_completion()
         
-        return True, "oc client 安裝成功"
+        return True, f"oc client 安裝成功 ({', '.join(installed)})"
 
     def _search_tar_in_install_source(self, pattern: str) -> str:
         """在 install_source 目錄中搜尋匹配的 tar 檔案"""

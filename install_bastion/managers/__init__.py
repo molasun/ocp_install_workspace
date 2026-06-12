@@ -5,7 +5,6 @@ from .ntp_manager import NTPManager
 from .others_manager import OthersManager
 from .mirror_registry_manager import MirrorRegistryManager
 from .install_manager import InstallManager
-from .mirror_image_manager import MirrorImageManager
 
 __all__ = [
     'BaseManager',
@@ -15,5 +14,5 @@ __all__ = [
     'OthersManager',
     'MirrorRegistryManager',
     'InstallManager',
-    'MirrorImageManager',
+    'SetupManager',
 ]

@@ -103,16 +103,22 @@ def _render_cluster_identity(config):
 def _render_ocp_version_info(config):
     """從 tool_config 讀取 OCP 版本並顯示，同時預覽 Registry FQDN"""
     tool_config = ConfigManager('tool_config.json').get_config()
-    ocp_release = tool_config.get('version_info', {}).get('OCP_RELEASE', '4.20.8')
-    
+    tool_version_info = tool_config.get('version_info', {})
+
+    for key, value in tool_version_info.items():
+        config['version_info'][key] = value
+
+    ocp_release = config['version_info'].get('OCP_RELEASE', '4.20.8')
     match = re.match(r'(\d+\.\d+)', ocp_release)
     ocp_version = match.group(1) if match else '4.20'
-    
     config['version_info']['OCP_VERSION'] = ocp_version
-    config['version_info']['OCP_RELEASE'] = ocp_release
     
     st.info(f"📦 OCP Version: **{ocp_version}** (Release: {ocp_release})")
-    
+
+    arch = config['version_info'].get('ARCHITECTURE', 'amd64')
+    rhel = config['version_info'].get('RHEL_VERSION', 'rhel9')
+    st.caption(f"🔧 Architecture: `{arch}` | RHEL: `{rhel}`")
+
     cluster_name = config['install_env']['CLUSTER_DOMAIN'].split('.')[0] \
         if '.' in config['install_env']['CLUSTER_DOMAIN'] else config['install_env']['CLUSTER_DOMAIN']
     if cluster_name and config['install_env']['BASE_DOMAIN']:
@@ -303,6 +309,12 @@ def _handle_form_submit(config_manager, config):
     elif not env.get('REGISTRY_PASSWORD'):
         st.error("Registry Password 不能為空")
     else:
+        tool_config = ConfigManager('tool_config.json').get_config()
+        tool_version_info = tool_config.get('version_info', {})
+        for key, value in tool_version_info.items():
+            if key not in config['version_info']:
+                config['version_info'][key] = value
+        
         _sync_node_data(config)
         config_manager.save_config(config)
         _generate_yamls(config)
@@ -321,16 +333,19 @@ def _generate_yamls(config):
     """產生 install-config.yaml 與 agent-config.yaml 並顯示預覽"""
     generator = YAMLGenerator(config, CURRENT_DIR)
     
+    # 確保目錄存在
+    install_source_ocp_dir = os.path.join(CURRENT_DIR, "install_source", "ocp")
+    os.makedirs(install_source_ocp_dir, exist_ok=True)
+    
     # install-config.yaml
     yaml_content = generator.generate_install_config()
-    output_path = os.path.join(CURRENT_DIR, "install/ocp/install-config.yaml")
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    output_path = os.path.join(install_source_ocp_dir, "install-config.yaml")
     with open(output_path, 'w') as f:
         f.write(yaml_content)
     
     # agent-config.yaml
     agent_yaml = generator.generate_agent_config()
-    agent_path = os.path.join(CURRENT_DIR, "install/ocp/agent-config.yaml")
+    agent_path = os.path.join(install_source_ocp_dir, "agent-config.yaml")
     with open(agent_path, 'w') as f:
         f.write(agent_yaml)
     

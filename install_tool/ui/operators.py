@@ -346,8 +346,10 @@ def _render_save_and_preview():
         cluster_config['csi_info'] = st.session_state.get('csi_config', {})
         yaml_content = YAMLGenerator(cluster_config, CURRENT_DIR).generate_imageset_config()
         
-        output_path = os.path.join(CURRENT_DIR, "install/ocp/imageset-config.yaml")
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        # imageset-config.yaml → install_source/mirror/
+        mirror_dir = os.path.join(CURRENT_DIR, "install_source", "mirror")
+        os.makedirs(mirror_dir, exist_ok=True)
+        output_path = os.path.join(mirror_dir, "imageset-config.yaml")
         with open(output_path, 'w') as f:
             f.write(yaml_content)
         
@@ -360,7 +362,7 @@ def _render_save_and_preview():
     if st.session_state.get('operators_saved', False):
         st.markdown("---")
         st.subheader("📄 Preview: imageset-config.yaml")
-        imageset_path = os.path.join(CURRENT_DIR, "install/ocp/imageset-config.yaml")
+        imageset_path = os.path.join(CURRENT_DIR, "install_source", "mirror", "imageset-config.yaml")
         if os.path.exists(imageset_path):
             with open(imageset_path, 'r') as f:
                 st.code(f.read(), language="yaml")
@@ -370,7 +372,7 @@ def _render_next_button():
     required_files = [
         os.path.join(CONFIG_DIR, 'operators.json'),
         os.path.join(CONFIG_DIR, 'additional_images.json'),
-        os.path.join(CURRENT_DIR, 'install/ocp/imageset-config.yaml')
+        os.path.join(CURRENT_DIR, "install_source", "mirror", "imageset-config.yaml")
     ]
     all_exist = all(os.path.exists(f) for f in required_files)
     

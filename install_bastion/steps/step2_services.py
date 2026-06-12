@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import streamlit as st
 import time
-from setup_manager import SetupManager
+from managers.setup_manager import SetupManager
 
 
 def render_step2_services():

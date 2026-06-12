@@ -10,6 +10,7 @@ from steps.step2_services import render_step2_services
 from steps.step3_cli_packages import render_step3_cli_packages
 from steps.step4_mirror import render_step4_mirror
 
+from managers.base_manager import BaseManager
 
 def load_cluster_config():
     """載入 cluster_config.json 配置檔"""
@@ -110,7 +111,6 @@ def parse_host_config(config_data: dict) -> dict:
     
     return host_config
 
-
 def _parse_nodes(env: dict, prefix: str, default_interface: str, default_device: str) -> list:
     """解析節點配置"""
     nodes = []
@@ -131,7 +131,6 @@ def _parse_nodes(env: dict, prefix: str, default_interface: str, default_device:
             break
     return nodes
 
-
 def _auto_assign_bootstrap_ip(env: dict, host_config: dict) -> str:
     """自動分配 Bootstrap IP"""
     masters = host_config.get('master', [])
@@ -149,9 +148,14 @@ def _auto_assign_bootstrap_ip(env: dict, host_config: dict) -> str:
 
 def init_session_state(cluster_config=None):
     """初始化 Session State"""
-    home_dir = os.path.expanduser("~")
-    install_source_dir = os.path.join(home_dir, "install_source")
-    
+    install_source_dir = BaseManager._get_install_source_dir()
+
+    reponame = 'ocp4'
+    if cluster_config:
+        ocp_version = cluster_config.get('version_info', {}).get('OCP_VERSION', '')
+        if ocp_version:
+            reponame = f"ocp{ocp_version.replace('.', '')}"
+
     defaults = {
         'current_step': 1,
         'installation_started': False,
@@ -171,7 +175,6 @@ def init_session_state(cluster_config=None):
             'haproxy_configure': True,
             'ntp_server_configure': True,
             'registry_configure': True,
-            'mirror_enable': False,
         },
         # 檔案路徑
         'file_paths': {
@@ -182,7 +185,7 @@ def init_session_state(cluster_config=None):
             'quayStorage': '/opt/quay-storage',
             'ocmirrorSource': os.path.join(install_source_dir, 'oc-mirror.tar.gz'),
             'imageSetFile': os.path.join(install_source_dir, 'oc-mirror-workspace'),
-            'reponame': 'ocp416',
+            'reponame': reponame,
         },
         # 步驟執行結果
         'step_results': {},
@@ -191,7 +194,6 @@ def init_session_state(cluster_config=None):
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
-
 
 def display_sidebar_progress():
     """側邊欄顯示進度"""
@@ -215,7 +217,6 @@ def display_sidebar_progress():
                 st.info(f"🔄 {step_name}")
             else:
                 st.text(f"⬜ {step_name}")
-
 
 def display_config_summary():
     """顯示載入的配置摘要"""
@@ -245,7 +246,6 @@ def display_config_summary():
                     if 'networkType' in net:
                         st.text(f"類型: {net['networkType']}")
 
-
 def main():
     """主入口函數"""
     st.set_page_config(
@@ -254,7 +254,18 @@ def main():
         layout="wide",
         initial_sidebar_state="expanded"
     )
-    
+
+    st.markdown(
+        """
+        <script>
+            window.scrollTo({top: 0, behavior: 'instant'});
+            document.documentElement.scrollTop = 0;
+            document.body.scrollTop = 0;
+        </script>
+        """,
+        unsafe_allow_html=True,
+    )
+
     # 載入 cluster_config.json
     cluster_config = load_cluster_config()
     if cluster_config:
@@ -295,7 +306,6 @@ def main():
             st.session_state.original_config = original_config
             st.session_state.config_params = original_config
             st.rerun()
-
 
 if __name__ == "__main__":
     main()

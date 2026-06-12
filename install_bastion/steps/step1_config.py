@@ -1,14 +1,6 @@
 import streamlit as st
 import time
 
-def _make_text_input_key(base_key: str, idx: int = None, field: str = None) -> str:
-    """生成唯一的 key"""
-    parts = [base_key]
-    if idx is not None:
-        parts.append(str(idx))
-    if field is not None:
-        parts.append(field)
-    return "_".join(parts)
 
 def render_step1_config():
     """步驟1: 確認環境配置"""
@@ -248,11 +240,6 @@ def render_step1_config():
             value=install_options.get('registry_configure', True),
             key="opt_registry"
         )
-        mirror_enable = st.checkbox(
-            "啟用鏡像同步", 
-            value=install_options.get('mirror_enable', False),
-            key="opt_mirror"
-        )
     
     st.markdown("---")
     
@@ -270,12 +257,10 @@ def render_step1_config():
                 'haproxy_configure': haproxy_configure,
                 'ntp_server_configure': ntp_server_configure,
                 'registry_configure': registry_configure,
-                'mirror_enable': mirror_enable,
             }
             
             # 合併到 config_params
-            st.session_state.config_params.update(st.session_state.install_options)
-            
+            st.session_state.config_params.update(st.session_state.install_options)            
             st.session_state.step1_complete = True
             st.session_state.current_step = 2
             st.success("配置已確認！進入步驟2...")
@@ -292,6 +277,5 @@ def render_step1_config():
                 'haproxy_configure': True,
                 'ntp_server_configure': True,
                 'registry_configure': True,
-                'mirror_enable': False,
             }
             st.rerun()

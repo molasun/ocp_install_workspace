@@ -10,7 +10,6 @@ from managers.ntp_manager import NTPManager
 from managers.others_manager import OthersManager
 from managers.mirror_registry_manager import MirrorRegistryManager
 from managers.install_manager import InstallManager
-from managers.mirror_image_manager import MirrorImageManager
 
 
 class SetupManager:
@@ -59,11 +58,7 @@ class SetupManager:
         self.install_manager = InstallManager(config, self.config_dir)
         self.install_manager.logs = self.logs
         self.install_manager.log_file = self.log_file
-        
-        self.mirror_image_manager = MirrorImageManager(config, self.config_dir)
-        self.mirror_image_manager.logs = self.logs
-        self.mirror_image_manager.log_file = self.log_file
-    
+   
     def _log(self, message: str, level: str = "INFO"):
         """記錄日誌（委派給第一個 manager 的 logger）"""
         self.dns_manager._log(message, level)
@@ -109,13 +104,6 @@ class SetupManager:
             'install_openshift_install': self.install_manager.install_openshift_install_cli,
             'install_oc_client': self.install_manager.install_oc_client,
             'verify_installations': self.install_manager.verify_installations,
-            
-            # Mirror Image Manager
-            'mirror_images': self.mirror_image_manager.run_full_mirror_workflow,
-            'install_oc_mirror': self.mirror_image_manager.install_oc_mirror,
-            'login_registry': self.mirror_image_manager.login_registry,
-            'execute_mirror': self.mirror_image_manager.execute_mirror,
-            'check_mirror_status': self.mirror_image_manager.check_mirror_status,
         }
         
         method = method_map.get(method_name)
