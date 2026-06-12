@@ -17,7 +17,14 @@ def render_step3_cli_packages():
     # 取得 home 目錄和 install_source 路徑
     home_dir = BaseManager._get_real_home()
     install_source_dir = BaseManager._get_install_source_dir()
-    
+
+    # 如果 file_paths 中的路徑指向 /root，更新為正確路徑
+    for key in ['ocpInstallDir', 'ocpClientDir', 'mirrorRegistryDir', 'ocmirrorSource']:
+        old_path = file_paths.get(key, '')
+        if '/root/install_source' in old_path:
+            filename = os.path.basename(old_path)
+            file_paths[key] = os.path.join(install_source_dir, filename)
+
     # === 檔案路徑配置 ===
     st.caption(f"📁 安裝來源目錄: `{install_source_dir}`")
     st.subheader("📁 安裝包路徑確認")

@@ -10,6 +10,8 @@ from steps.step2_services import render_step2_services
 from steps.step3_cli_packages import render_step3_cli_packages
 from steps.step4_mirror import render_step4_mirror
 
+from managers.base_manager import BaseManager
+
 
 def load_cluster_config():
     """載入 cluster_config.json 配置檔"""
@@ -149,9 +151,14 @@ def _auto_assign_bootstrap_ip(env: dict, host_config: dict) -> str:
 
 def init_session_state(cluster_config=None):
     """初始化 Session State"""
-    home_dir = os.path.expanduser("~")
-    install_source_dir = os.path.join(home_dir, "install_source")
-    
+    install_source_dir = BaseManager._get_install_source_dir()
+
+    reponame = 'ocp4'
+    if cluster_config:
+        ocp_version = cluster_config.get('version_info', {}).get('OCP_VERSION', '')
+        if ocp_version:
+            reponame = f"ocp{ocp_version.replace('.', '')}"
+
     defaults = {
         'current_step': 1,
         'installation_started': False,
@@ -182,7 +189,7 @@ def init_session_state(cluster_config=None):
             'quayStorage': '/opt/quay-storage',
             'ocmirrorSource': os.path.join(install_source_dir, 'oc-mirror.tar.gz'),
             'imageSetFile': os.path.join(install_source_dir, 'oc-mirror-workspace'),
-            'reponame': 'ocp416',
+            'reponame': reponame,
         },
         # 步驟執行結果
         'step_results': {},
