@@ -1,5 +1,4 @@
 import streamlit as st
-import streamlit.components.v1 as components
 import sys
 import os
 import json
@@ -12,18 +11,6 @@ from steps.step3_cli_packages import render_step3_cli_packages
 from steps.step4_mirror import render_step4_mirror
 
 from managers.base_manager import BaseManager
-
-
-def scroll_to_top():
-    """滾動到頁面頂部"""
-    components.html(
-        """
-        <script>
-            window.parent.document.querySelector('section.main').scrollTo(0, 0);
-        </script>
-        """,
-        height=0,
-    )
 
 def load_cluster_config():
     """載入 cluster_config.json 配置檔"""
@@ -268,7 +255,18 @@ def main():
         layout="wide",
         initial_sidebar_state="expanded"
     )
-    
+
+    st.markdown(
+        """
+        <script>
+            window.scrollTo({top: 0, behavior: 'instant'});
+            document.documentElement.scrollTop = 0;
+            document.body.scrollTop = 0;
+        </script>
+        """,
+        unsafe_allow_html=True,
+    )
+
     # 載入 cluster_config.json
     cluster_config = load_cluster_config()
     if cluster_config:
@@ -309,9 +307,6 @@ def main():
             st.session_state.original_config = original_config
             st.session_state.config_params = original_config
             st.rerun()
-
-    scroll_to_top()
-
 
 if __name__ == "__main__":
     main()
