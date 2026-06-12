@@ -1,7 +1,11 @@
 {
   "version_info": {
     "OCP_VERSION": "4.20",
-    "OCP_RELEASE": "4.20.8"
+    "OCP_RELEASE": "4.20.22",
+    "RHEL_VERSION": "rhel9",
+    "ARCHITECTURE": "amd64",
+    "HELM_VERSION": "3.17.1",
+    "MIRROR_REGISTRY_VERSION": "latest"
   },
   "install_env": {
     "INSTALL_MODE": "compact",
@@ -18,20 +22,17 @@
     "SERVICE_NETWORK_CIDR": "172.30.0.0/16",
     "NETWORK_TYPE": "OVNKubernetes",
     "MASTER01_IP": "192.168.100.222",
-    "MASTER02_IP": "192.168.100.223",
-    "MASTER03_IP": "192.168.100.224",
     "MASTER01_MAC": "52:54:00:e2:8d:b0",
     "MASTER01_INTERFACE": "enp1s0",
-    "MASTER01_DEVICE": "/dev/vda",
+    "MASTER01_DEVICE": "/dev/sda",
+    "MASTER02_IP": "192.168.100.223",
     "MASTER02_MAC": "52:54:00:e2:8d:b0",
     "MASTER02_INTERFACE": "enp1s0",
-    "MASTER02_DEVICE": "/dev/vda",
+    "MASTER02_DEVICE": "/dev/sda",
+    "MASTER03_IP": "192.168.100.224",
     "MASTER03_MAC": "52:54:00:e2:8d:b0",
     "MASTER03_INTERFACE": "enp1s0",
-    "MASTER03_DEVICE": "/dev/vda",
-    "GATEWAY_IP": "192.168.100.1",
-    "INFRA01_MAC": "BC:24:11:99:B8:1B",
-    "INFRA01_INTERFACE": "ens18",
-    "INFRA01_DEVICE": "/dev/sda"
+    "MASTER03_DEVICE": "/dev/sda",
+    "GATEWAY_IP": ""
   }
 }
