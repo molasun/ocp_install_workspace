@@ -230,34 +230,21 @@ class MirrorRegistryManager(BaseManager):
     
     def verify_connection(self) -> Tuple[bool, str]:
         """驗證 Mirror Registry 連線"""
-        bastion_name = self.config.get('bastion', {}).get('name', 'bastion')
-        cluster_name = self.config.get('clusterName', 'ocp4')
-        base_domain = self.config.get('baseDomain', 'example.com')
-        registry_password = self.config.get('registryPassword', 'password')
         bastion_ip = self.config.get('bastion', {}).get('ip', '')
+        registry_password = self.config.get('registryPassword', 'password')
         
-        bastion_fqdn = f"{bastion_name}.{cluster_name}.{base_domain}"
+        if not bastion_ip:
+            return False, "無法取得 Bastion IP"
         
-        # 方法1: 使用 IP 直接連線（避免 DNS 問題）
-        if bastion_ip:
-            login_cmd = (
-                f"podman login {bastion_ip}:8443 "
-                f"-u init -p {registry_password} "
-                f"--tls-verify=false"
-            )
-            success, stdout, stderr = self._run_command(login_cmd)
-            if success:
-                return True, f"Mirror Registry 連線成功 (IP: {bastion_ip}:8443)"
-        
-        # 方法2: 使用 FQDN 連線
+        # 使用 IP 直接連線
         login_cmd = (
-            f"podman login {bastion_fqdn}:8443 "
+            f"podman login {bastion_ip}:8443 "
             f"-u init -p {registry_password} "
             f"--tls-verify=false"
         )
-        success, stdout, stderr = self._run_command(login_cmd)
+        success, stdout, stderr = self._run_command(login_cmd, timeout=30)
         
         if success:
-            return True, f"Mirror Registry 連線成功 (FQDN: {bastion_fqdn}:8443)"
+            return True, "Registry 連線驗證通過"
         else:
-            return False, f"Registry 連線失敗，請確認 Registry 服務已啟動。錯誤: {stderr[:200]}"
+            return False, f"Registry 連線失敗: {stderr[:200]}"

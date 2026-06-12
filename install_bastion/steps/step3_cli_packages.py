@@ -201,11 +201,15 @@ def render_step3_cli_packages():
                     break
             if result.get('success', False):
                 st.success(f"{task_name}: {result.get('message', '')}")
-                # Registry 安裝成功且驗證通過
-                if method == 'setup_registry' and '驗證通過' in result.get('message', ''):
-                    st.info("🔐 Mirror Registry 已可使用，請在步驟4進行鏡像同步")
-                elif method == 'setup_registry':
-                    st.warning("⚠️ Mirror Registry 安裝完成但驗證未通過，請檢查 DNS 設定")
+                # Registry 安裝成功判斷
+                if method == 'setup_registry':
+                    msg = result.get('message', '')
+                    if '驗證通過' in msg or '驗證成功' in msg or '連線成功' in msg:
+                        st.info("🔐 Mirror Registry 已可使用，請在步驟4進行鏡像同步")
+                    elif '已安裝' in msg or '跳過' in msg:
+                        st.info("🔐 Mirror Registry 已安裝，請在步驟4進行鏡像同步")
+                    else:
+                        st.warning("⚠️ Mirror Registry 安裝完成但驗證未通過，請檢查 DNS 設定")
             else:
                 st.error(f"{task_name}: {result.get('message', '')}")
         
