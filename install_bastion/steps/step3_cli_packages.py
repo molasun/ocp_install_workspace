@@ -2,7 +2,7 @@ import streamlit as st
 import time
 import os
 import subprocess
-from setup_manager import SetupManager
+from managers.setup_manager import SetupManager
 from managers.base_manager import BaseManager 
 
 def _get_version_info():

@@ -175,7 +175,6 @@ def init_session_state(cluster_config=None):
             'haproxy_configure': True,
             'ntp_server_configure': True,
             'registry_configure': True,
-            'mirror_enable': False,
         },
         # 檔案路徑
         'file_paths': {

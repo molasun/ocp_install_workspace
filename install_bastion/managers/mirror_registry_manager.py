@@ -13,24 +13,34 @@ class MirrorRegistryManager(BaseManager):
         if not bastion_ip:
             return False, "無法取得 Bastion IP"
         
-        # 方法1: 使用 ss 檢查 port 8443 是否有進程監聽（最可靠）
+        # 方法1: 檢查 port 8443
         success, stdout, _ = self._run_command(
-            f"ss -tlnp | grep ':8443'"
+            f"ss -tlnp 2>/dev/null | grep ':8443' || netstat -tlnp 2>/dev/null | grep ':8443'"
         )
         if success and stdout.strip():
-            self._log(f"Port 8443 監聽中: {stdout.strip()[:100]}")
-            return True, "Mirror Registry 正在運行"
+            return True, "Mirror Registry 正在運行（port 8443 已監聽）"
         
         # 方法2: 檢查容器是否在運行
         success, stdout, _ = self._run_command(
-            "podman ps --filter 'name=quay' --format '{{.Names}} {{.Status}}' 2>/dev/null || "
-            "docker ps --filter 'name=quay' --format '{{.Names}} {{.Status}}' 2>/dev/null"
+            "podman ps --filter 'name=quay' --format '{{.Names}}' 2>/dev/null || "
+            "docker ps --filter 'name=quay' --format '{{.Names}}' 2>/dev/null"
         )
         if success and stdout.strip():
-            self._log(f"Registry 容器運行中: {stdout.strip()}")
-            return True, f"Mirror Registry 容器運行中"
+            return True, f"Registry 容器運行中: {stdout.strip()}"
         
-        # 方法3: 使用 curl 檢查（最後手段）
+        # 方法3: 檢查是否已安裝（容器存在但可能停止）
+        # 檢查 /opt/quay 目錄是否存在且包含配置
+        quay_root = self.config.get('quayRoot', '/opt/quay')
+        if os.path.exists(quay_root) and os.path.exists(f"{quay_root}/config"):
+            success, stdout, _ = self._run_command(
+                "podman ps -a --filter 'name=quay' --format '{{.Names}} {{.Status}}' 2>/dev/null || "
+                "docker ps -a --filter 'name=quay' --format '{{.Names}} {{.Status}}' 2>/dev/null"
+            )
+            if success and stdout.strip():
+                return True, f"Registry 已安裝但未運行: {stdout.strip()}"
+            return True, "Registry 已安裝（目錄存在）"
+        
+        # 方法4: curl 檢查
         success, stdout, _ = self._run_command(
             f"curl -sk -o /dev/null -w '%{{http_code}}' --connect-timeout 3 https://{bastion_ip}:8443/v2/",
             timeout=5
@@ -38,7 +48,7 @@ class MirrorRegistryManager(BaseManager):
         if success and stdout.strip() in ['200', '401']:
             return True, "Mirror Registry HTTP 回應正常"
         
-        return False, "Mirror Registry 未運行（port 8443 無服務）"
+        return False, "Mirror Registry 未安裝"
     
     def install_podman(self) -> Tuple[bool, str]:
         """安裝 Podman"""
@@ -81,29 +91,38 @@ class MirrorRegistryManager(BaseManager):
         
         # === 檢查是否已安裝並運行 ===
         installed, msg = self.check_installed()
+        
         if installed:
-            self._log(f"Mirror Registry 已在運行: {msg}")
+            # 已安裝：嘗試啟動（如果未運行）並驗證
+            self._log(f"Mirror Registry 已安裝: {msg}")
+            
+            if "未運行" in msg:
+                self._log("嘗試啟動現有 Registry...")
+                self._run_command(
+                    "podman start $(podman ps -a --filter 'name=quay' --format '{{.Names}}' | head -1) 2>/dev/null || "
+                    "docker start $(docker ps -a --filter 'name=quay' --format '{{.Names}}' | head -1) 2>/dev/null"
+                )
+                time.sleep(5)
+            
+            # 驗證連線
             verify_success, verify_msg = self.verify_connection()
             if verify_success:
-                return True, "Mirror Registry 已安裝且連線驗證成功"
+                return True, "✅ Mirror Registry 已安裝，跳過安裝步驟。連線驗證成功"
             else:
-                return False, f"Registry 運行中但連線失敗: {verify_msg}"
+                return False, f"❌ Mirror Registry 已安裝但連線失敗: {verify_msg}"
         
-        # === 未運行，執行安裝 ===
-        self._log("Mirror Registry 未運行，開始安裝...")
+        # === 未安裝，執行全新安裝 ===
+        self._log("📦 Mirror Registry 未安裝，開始全新安裝...")
         
-        # 搜尋安裝包
         mirror_registry_dir = self._find_mirror_registry_tar()
         if not mirror_registry_dir:
             return False, "找不到 Mirror Registry 安裝包"
         
-        # 解壓安裝包
         self._log(f"解壓 {mirror_registry_dir}...")
         success, _, err = self._run_command(f"tar -xzf {mirror_registry_dir} -C /tmp/")
         if not success:
-            return False, f"解壓 Mirror Registry 失敗: {err}"
+            return False, f"解壓失敗: {err}"
         
-        # 執行安裝
         install_cmd = (
             f"cd /tmp && ./mirror-registry install "
             f"--quayHostname {bastion_fqdn}:8443 "
@@ -112,33 +131,28 @@ class MirrorRegistryManager(BaseManager):
             f"--initPassword {registry_password}"
         )
         
-        self._log(f"執行安裝命令: {install_cmd}")
+        self._log(f"執行安裝...")
         success, stdout, stderr = self._run_command(install_cmd, timeout=600)
         
         if not success:
-            return False, f"Mirror Registry 安裝失敗: {stderr[:500]}"
+            return False, f"安裝失敗: {stderr[:500]}"
         
-        # 信任 CA 憑證
         self._trust_ca(quay_root)
         
-        # 等待服務啟動
-        self._log("等待 Mirror Registry 服務啟動...")
+        # 等待啟動
         time.sleep(10)
-        
-        # 確認服務已啟動
         for i in range(6):
             installed, _ = self.check_installed()
-            if installed:
+            if installed and "運行" in installed:
                 break
-            self._log(f"等待服務啟動... ({i+1}/6)")
             time.sleep(5)
         
-        # 驗證連線
         verify_success, verify_msg = self.verify_connection()
         if verify_success:
-            return True, "Mirror Registry 安裝成功且連線驗證通過"
+            return True, "✅ Mirror Registry 安裝成功，連線驗證通過"
         else:
-            return False, f"Mirror Registry 安裝完成但連線驗證失敗: {verify_msg}"
+            return False, f"安裝完成但連線失敗: {verify_msg}"
+
 
     def _find_mirror_registry_tar(self) -> Optional[str]:
         """尋找 mirror-registry 安裝包"""
