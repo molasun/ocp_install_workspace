@@ -9,12 +9,19 @@ def show_review_page():
     st.markdown("檢查所有生成的配置文件。")
     
     yaml_files = [
-        {"title": "install-config.yaml", "path": os.path.join(CURRENT_DIR, "install/ocp/install-config.yaml")},
-        {"title": "agent-config.yaml", "path": os.path.join(CURRENT_DIR, "install/ocp/agent-config.yaml")},
-        {"title": "imageset-config.yaml", "path": os.path.join(CURRENT_DIR, "install/ocp/imageset-config.yaml")},
+        {
+            "title": "install-config.yaml", 
+            "path": os.path.join(CURRENT_DIR, "install_source", "ocp", "install-config.yaml")
+        },
+        {
+            "title": "agent-config.yaml", 
+            "path": os.path.join(CURRENT_DIR, "install_source", "ocp", "agent-config.yaml")
+        },
+        {
+            "title": "imageset-config.yaml", 
+            "path": os.path.join(CURRENT_DIR, "install_source", "mirror", "imageset-config.yaml")
+        },
     ]
-
-    imageset_path = os.path.join(CURRENT_DIR, "install/ocp/imageset-config.yaml")
     
     all_valid = True
     for yf in yaml_files:
@@ -65,12 +72,12 @@ def _render_mirror_guide():
     st.subheader("🚀 執行 oc-mirror")
     st.markdown("所有配置文件已就緒。請在**終端機**中執行以下命令來開始鏡像同步：")
     
-    install_dir = os.path.join(CURRENT_DIR, "install/ocp")
-    cache_dir = os.path.join(install_dir, "cache")
-    imageset_path = os.path.join(install_dir, "imageset-config.yaml")
+    mirror_dir = os.path.join(CURRENT_DIR, "install_source", "mirror")
+    cache_dir = os.path.join(CURRENT_DIR, "install_source", "mirror-cache")
+    imageset_path = os.path.join(mirror_dir, "imageset-config.yaml")
     
-    cmd_v2 = f"mkdir -p {cache_dir}\noc-mirror -c {imageset_path} file://{install_dir} --cache-dir {cache_dir} --v2"
-    cmd_v1 = f"mkdir -p {cache_dir}\noc-mirror -c {imageset_path} file://{install_dir} --cache-dir {cache_dir}"
+    cmd_v2 = f"mkdir -p {cache_dir}\noc-mirror -c {imageset_path} file://{mirror_dir} --cache-dir {cache_dir} --v2"
+    cmd_v1 = f"mkdir -p {cache_dir}\noc-mirror -c {imageset_path} file://{mirror_dir} --cache-dir {cache_dir}"
     
     tab1, tab2 = st.tabs(["v2 (推薦)", "v1"])
     

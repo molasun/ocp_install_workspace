@@ -333,16 +333,19 @@ def _generate_yamls(config):
     """產生 install-config.yaml 與 agent-config.yaml 並顯示預覽"""
     generator = YAMLGenerator(config, CURRENT_DIR)
     
+    # 確保目錄存在
+    install_source_ocp_dir = os.path.join(CURRENT_DIR, "install_source", "ocp")
+    os.makedirs(install_source_ocp_dir, exist_ok=True)
+    
     # install-config.yaml
     yaml_content = generator.generate_install_config()
-    output_path = os.path.join(CURRENT_DIR, "install/ocp/install-config.yaml")
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    output_path = os.path.join(install_source_ocp_dir, "install-config.yaml")
     with open(output_path, 'w') as f:
         f.write(yaml_content)
     
     # agent-config.yaml
     agent_yaml = generator.generate_agent_config()
-    agent_path = os.path.join(CURRENT_DIR, "install/ocp/agent-config.yaml")
+    agent_path = os.path.join(install_source_ocp_dir, "agent-config.yaml")
     with open(agent_path, 'w') as f:
         f.write(agent_yaml)
     

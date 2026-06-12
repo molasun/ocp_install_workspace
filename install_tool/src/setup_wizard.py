@@ -57,7 +57,7 @@ class SetupWizard:
 
     DEFAULT_GRPCURL_VERSION = "1.9.3" 
     DIR_INSTALL_SOURCE = "install_source"
-    DIR_INSTALL_OCP = "install/ocp"
+    DIR_INSTALL_OCP = "install_source/ocp" 
     DIR_DOCKER = ".docker"
     DIR_MIRROR = "mirror"
     DIR_COREOS_ISO = "install_source/coreos"
@@ -147,7 +147,7 @@ class SetupWizard:
         dirs_to_create = [
             self.install_source_dir,
             self.docker_config_dir,
-            self.install_ocp_dir,
+            os.path.join(self.current_dir, self.DIR_INSTALL_OCP),
             os.path.join(self.install_source_dir, self.DIR_MIRROR),
             os.path.join(self.current_dir, self.DIR_COREOS_ISO),
         ]
