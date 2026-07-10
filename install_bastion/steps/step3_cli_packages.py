@@ -8,14 +8,14 @@ from managers.base_manager import BaseManager
 def _get_version_info():
     """從 session_state 取得完整的 version_info"""
     config_params = st.session_state.get('config_params', {})
-    v_info = config_params.get('version_info', {})
+    v_info = config_params.get('versionInfo', {})
     return {
-        'arch': v_info.get('ARCHITECTURE', 'amd64'),
-        'rhel': v_info.get('RHEL_VERSION', 'rhel9'),
-        'ocp_release': v_info.get('OCP_RELEASE', '4.20.8'),
-        'ocp_version': v_info.get('OCP_VERSION', '4.20'),
-        'helm_version': v_info.get('HELM_VERSION', ''),
-        'mirror_registry_version': v_info.get('MIRROR_REGISTRY_VERSION', ''),
+        'arch': v_info.get('architecture', 'amd64'),
+        'rhel': v_info.get('rhelVersion', 'rhel9'),
+        'ocp_release': v_info.get('ocpRelease', '4.20.8'),
+        'ocp_version': v_info.get('ocpVersion', '4.20'),
+        'helm_version': v_info.get('helmVersion', ''),
+        'mirror_registry_version': v_info.get('mirrorRegistryVersion', ''),
     }
 
 def _build_tar_filename(tar_type: str, arch: str, rhel: str, ocp_release: str) -> str:
