@@ -20,6 +20,7 @@ class SessionKeys:
     CURRENT_VIEW = 'current_view'
     SSH_KEYGEN_DONE = 'ssh_keygen_done'
     SSH_PUBKEY = 'generated_ssh_pubkey'
+    IMAGES_PREPARED = 'images_prepared'
 
 
 class ToolConfigUI:
@@ -54,6 +55,7 @@ class ToolConfigUI:
         st.divider()
         self._render_tool_config_section(config)
         self._render_operator_catalog_section(config)
+        self._render_container_images_section(config)
         st.divider()
         self._render_next_button()
     
@@ -572,6 +574,72 @@ class ToolConfigUI:
                 pct = 70 + int((current / total) * 20)
                 progress_bar.progress(pct, f"處理中... ({current}/{total})")
     
+    # === Container Images 區塊 ===
+
+    def _render_container_images_section(self, config: dict) -> None:
+        """渲染離線容器映像檔準備區塊"""
+        if not st.session_state.get(SessionKeys.TOOLS_DOWNLOADED, False):
+            return
+
+        with st.expander("📦 Container Images for Offline Use", expanded=True):
+            arch = config.get('version_info', {}).get('ARCHITECTURE', 'amd64')
+
+            # 掃描需要的映像檔
+            if st.button("🔍 掃描 Mirror Registry 需要的映像檔", key="btn_scan_images"):
+                with st.spinner("正在掃描 mirror-registry 二進位檔..."):
+                    images = self.wizard.scan_mirror_registry_images(arch)
+                    st.session_state['required_images'] = images
+                    if images:
+                        st.success(f"掃描到 {len(images)} 個映像檔")
+                    else:
+                        st.warning("未掃描到映像檔，請確認 mirror-registry tar 已下載")
+
+            images = st.session_state.get('required_images', [])
+            if not images:
+                st.info("點擊上方按鈕掃描需要的容器映像檔")
+                return
+
+            # 顯示映像檔清單
+            st.markdown("**需要的容器映像檔：**")
+            for img in images:
+                st.code(img, language="text")
+
+            # 檢查已打包的 tar
+            saved_tars = []
+            for img in images:
+                short_name = img.split('/')[-1].replace(':', '-')
+                tar_path = os.path.join(self.wizard.install_source_dir, f"{short_name}.tar")
+                if os.path.exists(tar_path) and os.path.getsize(tar_path) > 0:
+                    size_mb = os.path.getsize(tar_path) / (1024 * 1024)
+                    saved_tars.append((img, tar_path, f"{size_mb:.1f} MB"))
+
+            if saved_tars:
+                st.success(f"✅ 已打包 {len(saved_tars)}/{len(images)} 個映像檔")
+                for img, path, size in saved_tars:
+                    st.caption(f"  {img} → `{path}` ({size})")
+
+            # 下載並打包缺失的映像檔
+            saved_imgs = [t[0] for t in saved_tars]
+            missing = [img for img in images if img not in saved_imgs]
+
+            if missing:
+                if st.button(f"📥 下載並打包 {len(missing)} 個映像檔", type="primary", key="btn_pull_images"):
+                    all_success = True
+                    for img in missing:
+                        with st.spinner(f"下載 {img}..."):
+                            success, msg = self.wizard.pull_and_save_image(img)
+                        if success:
+                            st.success(f"✅ {img}")
+                        else:
+                            st.error(f"❌ {msg}")
+                            all_success = False
+                    if all_success:
+                        st.session_state[SessionKeys.IMAGES_PREPARED] = True
+                    st.rerun()
+            else:
+                st.session_state[SessionKeys.IMAGES_PREPARED] = True
+                st.success("🎉 所有映像檔已就緒！")
+
     def _render_next_button(self) -> None:
         """渲染下一步按鈕"""
         if st.session_state.get(SessionKeys.TOOLS_DOWNLOADED, False):
