@@ -101,6 +101,10 @@ def parse_host_config(config_data: dict) -> dict:
         version_info['ocpVersion'] = version['OCP_VERSION']
     if 'OCP_RELEASE' in version:
         version_info['ocpRelease'] = version['OCP_RELEASE']
+    if 'ARCHITECTURE' in version:
+        version_info['architecture'] = version['ARCHITECTURE']
+    if 'RHEL_VERSION' in version:
+        version_info['rhelVersion'] = version['RHEL_VERSION']
     if version_info:
         host_config['versionInfo'] = version_info
     
@@ -151,11 +155,20 @@ def init_session_state(cluster_config=None):
     """初始化 Session State"""
     install_source_dir = BaseManager._get_install_source_dir()
 
-    reponame = 'ocp4'
-    if cluster_config:
-        ocp_version = cluster_config.get('version_info', {}).get('OCP_VERSION', '')
-        if ocp_version:
-            reponame = f"ocp{ocp_version.replace('.', '')}"
+    # 從 versionInfo 取得版本資訊（parse_host_config 產生 camelCase key）
+    version_info = cluster_config.get('versionInfo', {}) if cluster_config else {}
+    ocp_version = version_info.get('ocpVersion', '')
+    ocp_release = version_info.get('ocpRelease', '')
+    arch = version_info.get('architecture', 'amd64')
+    rhel = version_info.get('rhelVersion', 'rhel9')
+
+    reponame = f"ocp{ocp_version.replace('.', '')}" if ocp_version else 'ocp4'
+
+    # 根據版本資訊動態構建 tar 包檔名（與 install_tool 下載的檔名一致）
+    ocp_install_filename = f"openshift-install-{rhel}-{arch}.tar.gz" if rhel and arch else 'openshift-install-linux.tar.gz'
+    ocp_client_filename = f"openshift-client-linux-{arch}-{rhel}-{ocp_release}.tar.gz" if ocp_release and arch and rhel else 'openshift-client-linux.tar.gz'
+    ocmirror_filename = f"oc-mirror.{rhel}.tar.gz" if rhel else 'oc-mirror.tar.gz'
+    mirror_registry_filename = f"mirror-registry-{arch}.tar.gz" if arch else 'mirror-registry.tar.gz'
 
     defaults = {
         'current_step': 1,
@@ -179,12 +192,12 @@ def init_session_state(cluster_config=None):
         },
         # 檔案路徑
         'file_paths': {
-            'mirrorRegistryDir': os.path.join(install_source_dir, 'mirror-registry.tar.gz'),
-            'ocpInstallDir': os.path.join(install_source_dir, 'openshift-install-linux.tar.gz'),
-            'ocpClientDir': os.path.join(install_source_dir, 'openshift-client-linux.tar.gz'),
+            'mirrorRegistryDir': os.path.join(install_source_dir, mirror_registry_filename),
+            'ocpInstallDir': os.path.join(install_source_dir, ocp_install_filename),
+            'ocpClientDir': os.path.join(install_source_dir, ocp_client_filename),
             'quayRoot': '/opt/quay',
             'quayStorage': '/opt/quay-storage',
-            'ocmirrorSource': os.path.join(install_source_dir, 'oc-mirror.tar.gz'),
+            'ocmirrorSource': os.path.join(install_source_dir, ocmirror_filename),
             'imageSetFile': os.path.join(install_source_dir, 'oc-mirror-workspace'),
             'reponame': reponame,
         },

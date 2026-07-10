@@ -181,15 +181,34 @@ class InstallManager(BaseManager):
         return True, f"oc client 安裝成功 ({', '.join(installed)})"
 
     def _search_tar_in_install_source(self, pattern: str) -> str:
-        """在 install_source 目錄中搜尋匹配的 tar 檔案"""
+        """在 install_source 目錄中搜尋匹配的 tar 檔案，優先選擇版本號匹配的"""
         if not os.path.exists(self._install_source_dir):
             return None
-        
+
+        # 從 config 取得 OCP_RELEASE 用於版本優先匹配
+        version_info = self.config.get('versionInfo', {})
+        ocp_release = version_info.get('ocpRelease', '')
+
+        matching_files = []
         for filename in os.listdir(self._install_source_dir):
             if pattern in filename and filename.endswith('.tar.gz'):
-                return os.path.join(self._install_source_dir, filename)
-        
-        return None
+                matching_files.append(filename)
+
+        if not matching_files:
+            return None
+
+        # 若只有一個匹配檔案，直接回傳
+        if len(matching_files) == 1:
+            return os.path.join(self._install_source_dir, matching_files[0])
+
+        # 若有多個匹配檔案，優先選擇包含正確版本號的
+        if ocp_release:
+            for filename in matching_files:
+                if ocp_release in filename:
+                    return os.path.join(self._install_source_dir, filename)
+
+        # Fallback：回傳第一個匹配檔案
+        return os.path.join(self._install_source_dir, matching_files[0])
 
     def _setup_bash_completion(self) -> None:
         """設定 oc 命令的 bash completion"""

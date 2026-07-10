@@ -274,10 +274,11 @@ def _display_service_status(manager: SetupManager, install_options: dict):
         services_to_check.append(("Firewalld", "firewalld"))
     
     if services_to_check:
-        cols = st.columns(len(services_to_check))
+        num_cols = min(len(services_to_check), 2)
+        cols = st.columns(num_cols)
         
         for i, (name, service) in enumerate(services_to_check):
-            with cols[i]:
+            with cols[i % num_cols]:
                 # 對於 firewalld，期望是 stopped
                 if service == "firewalld":
                     is_active = manager.dns_manager._check_service_status(service)
