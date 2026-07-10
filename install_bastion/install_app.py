@@ -105,6 +105,10 @@ def parse_host_config(config_data: dict) -> dict:
         version_info['architecture'] = version['ARCHITECTURE']
     if 'RHEL_VERSION' in version:
         version_info['rhelVersion'] = version['RHEL_VERSION']
+    if 'HELM_VERSION' in version:
+        version_info['helmVersion'] = version['HELM_VERSION']
+    if 'MIRROR_REGISTRY_VERSION' in version:
+        version_info['mirrorRegistryVersion'] = version['MIRROR_REGISTRY_VERSION']
     if version_info:
         host_config['versionInfo'] = version_info
     
