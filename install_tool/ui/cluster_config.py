@@ -74,6 +74,45 @@ def _is_valid_mac(mac):
     pattern = r'^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$'
     return bool(re.match(pattern, mac))
 
+def _is_valid_hostname(name):
+    """驗證主機名稱格式（RFC 1123）"""
+    if not name:
+        return False
+    # 長度 <= 63，僅小寫字母/數字/連字號，不以連字號開頭或結尾
+    pattern = r'^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
+    return bool(re.match(pattern, name))
+
+def _collect_all_node_names(config, exclude_prefix=None, exclude_index=None):
+    """收集所有節點名稱（用於重複檢查），可排除指定節點
+
+    exclude_prefix 支援 'BASTION'、'BOOTSTRAP' 以及 'MASTER'/'INFRA'/'WORKER'。
+    對 BASTION/BOOTSTRAP，exclude_index 不適用（單一節點）。
+    """
+    env = config.get('install_env', {})
+    names = []
+
+    # Bastion / Bootstrap（單一節點，用 prefix 排除）
+    for prefix in ['BASTION', 'BOOTSTRAP']:
+        if prefix == exclude_prefix:
+            continue
+        val = env.get(f'{prefix}_NAME', '')
+        if val:
+            names.append(val)
+
+    # Master / Infra / Worker（多節點，用 prefix + index 排除）
+    for prefix in ['MASTER', 'INFRA', 'WORKER']:
+        i = 1
+        while True:
+            ip_key = f"{prefix}{i:02d}_IP"
+            if ip_key not in env or not env[ip_key]:
+                break
+            name_key = f"{prefix}{i:02d}_NAME"
+            val = env.get(name_key, '')
+            if val and not (prefix == exclude_prefix and i == exclude_index):
+                names.append(val)
+            i += 1
+    return names
+
 def _render_cluster_identity(config):
     """渲染安裝模式、集群名稱與 Base Domain 的輸入區塊"""
     st.subheader("Cluster Identity")
@@ -157,34 +196,44 @@ def _render_node_section(config_manager, config, label, count_key, min_val, max_
         _render_node_inputs(config, i, prefix, default_mac, default_iface, default_device)
 
 def _update_node_count(config_manager, config, count_key, new_count, prefix):
-    """更新節點數量並清理或初始化對應的 IP 欄位"""
+    """更新節點數量並清理或初始化對應的 IP/NAME 欄位"""
     old_count = st.session_state[count_key]
     st.session_state[count_key] = new_count
     
     for i in range(new_count + 1, old_count + 1):
-        ip_key = f"{prefix}{i:02d}_IP"
-        state_key = f"ip_{ip_key}"
-        st.session_state.pop(state_key, None)
-        config['install_env'].pop(ip_key, None)
+        for suffix in ["IP", "NAME", "MAC", "INTERFACE", "DEVICE"]:
+            key = f"{prefix}{i:02d}_{suffix}"
+            state_prefix = 'name' if suffix == 'NAME' else 'ip' if suffix == 'IP' else 'mac' if suffix == 'MAC' else 'iface' if suffix == 'INTERFACE' else 'device'
+            state_key = f"{state_prefix}_{key}"
+            st.session_state.pop(state_key, None)
+            config['install_env'].pop(key, None)
     
     for i in range(old_count + 1, new_count + 1):
-        ip_key = f"{prefix}{i:02d}_IP"
-        state_key = f"ip_{ip_key}"
-        if state_key not in st.session_state:
-            st.session_state[state_key] = ""
+        for suffix in ["IP", "NAME", "MAC", "INTERFACE", "DEVICE"]:
+            key = f"{prefix}{i:02d}_{suffix}"
+            state_prefix = 'name' if suffix == 'NAME' else 'ip' if suffix == 'IP' else 'mac' if suffix == 'MAC' else 'iface' if suffix == 'INTERFACE' else 'device'
+            state_key = f"{state_prefix}_{key}"
+            if state_key not in st.session_state:
+                if suffix == "NAME":
+                    st.session_state[state_key] = f"{prefix.lower()}-{i-1}"
+                else:
+                    st.session_state[state_key] = ""
     
     config_manager.save_config(config)
     st.rerun()
 
 def _render_node_inputs(config, i, prefix, default_mac, default_iface, default_device):
-    """渲染單個節點的 IP、MAC、Interface、Device 輸入欄位並即時驗證"""
+    """渲染單個節點的 Name、IP、MAC、Interface、Device 輸入欄位並即時驗證"""
     ip_key = f"{prefix}{i:02d}_IP"
     mac_key = f"{prefix}{i:02d}_MAC"
     iface_key = f"{prefix}{i:02d}_INTERFACE"
     device_key = f"{prefix}{i:02d}_DEVICE"
+    name_key = f"{prefix}{i:02d}_NAME"
+    default_name = f"{prefix.lower()}-{i-1}"
     
     # 初始化 session state
     for key, default in [
+        (f"name_{name_key}", config['install_env'].get(name_key, default_name)),
         (f"ip_{ip_key}", config['install_env'].get(ip_key, "")),
         (f"mac_{mac_key}", config['install_env'].get(mac_key, default_mac)),
         (f"iface_{iface_key}", config['install_env'].get(iface_key, default_iface)),
@@ -193,7 +242,9 @@ def _render_node_inputs(config, i, prefix, default_mac, default_iface, default_d
         if key not in st.session_state:
             st.session_state[key] = default
     
-    c1, c2, c3, c4 = st.columns([3, 3, 2, 2])
+    c0, c1, c2, c3, c4 = st.columns([2, 3, 3, 2, 2])
+    with c0:
+        name_val = st.text_input(f"{prefix} {i:02d} Name", value=st.session_state[f"name_{name_key}"], key=f"input_{name_key}")
     with c1:
         ip_val = st.text_input(f"{prefix} {i:02d} IP", value=st.session_state[f"ip_{ip_key}"], key=f"input_{ip_key}")
     with c2:
@@ -203,15 +254,21 @@ def _render_node_inputs(config, i, prefix, default_mac, default_iface, default_d
     with c4:
         device_val = st.text_input(f"{prefix} {i:02d} Device", value=st.session_state[f"device_{device_key}"], key=f"input_{device_key}")
     
+    if name_val and not _is_valid_hostname(name_val):
+        st.error("❌ Invalid hostname (lowercase alphanumeric and hyphens, max 63 chars)")
+    elif name_val and name_val in _collect_all_node_names(config, exclude_prefix=prefix, exclude_index=i):
+        st.error("❌ Duplicate hostname")
     if ip_val and not _is_valid_ipv4(ip_val):
         st.error("❌ Invalid IP")
     if mac_val and not _is_valid_mac(mac_val):
         st.error("❌ Invalid MAC")
     
+    st.session_state[f"name_{name_key}"] = name_val
     st.session_state[f"ip_{ip_key}"] = ip_val
     st.session_state[f"mac_{mac_key}"] = mac_val
     st.session_state[f"iface_{iface_key}"] = iface_val
     st.session_state[f"device_{device_key}"] = device_val
+    config['install_env'][name_key] = name_val
     config['install_env'][ip_key] = ip_val
     config['install_env'][mac_key] = mac_val
     config['install_env'][iface_key] = iface_val
@@ -229,24 +286,49 @@ def _render_cluster_form(config_manager, config):
             _handle_form_submit(config_manager, config)
 
 def _render_other_ips(config):
-    """渲染 Bastion、Gateway、Bootstrap IP 的輸入欄位"""
-    st.subheader("Other IPs")
-    col_bast, col_gw, col_boot = st.columns(3)
-    with col_bast:
+    """渲染 Bastion、Gateway、Bootstrap 的名稱與 IP 輸入欄位"""
+    st.subheader("Other Nodes")
+    
+    # Bastion Name + IP
+    st.markdown("**Bastion**")
+    col_bast_name, col_bast_ip = st.columns([1, 2])
+    with col_bast_name:
+        bastion_name = st.text_input(
+            "Bastion Name", value=config['install_env'].get('BASTION_NAME', 'bastion'), key="bastion_name_input")
+        if bastion_name and not _is_valid_hostname(bastion_name):
+            st.error("❌ Invalid hostname")
+        elif bastion_name and bastion_name in _collect_all_node_names(config, exclude_prefix='BASTION'):
+            st.error("❌ Duplicate hostname")
+        config['install_env']['BASTION_NAME'] = bastion_name
+    with col_bast_ip:
         bastion_ip = st.text_input("Bastion IP", value=config['install_env'].get('BASTION_IP', ''), key="bastion_ip_input")
         if bastion_ip and not _is_valid_ipv4(bastion_ip):
             st.error("❌ Invalid IP")
         config['install_env']['BASTION_IP'] = bastion_ip
-    with col_gw:
-        gateway_ip = st.text_input("Gateway IP", value=config['install_env'].get('GATEWAY_IP', ''), key="gateway_ip_input")
-        if gateway_ip and not _is_valid_ipv4(gateway_ip):
-            st.error("❌ Invalid IP")
-        config['install_env']['GATEWAY_IP'] = gateway_ip
-    with col_boot:
+    
+    # Bootstrap Name + IP
+    st.markdown("**Bootstrap**")
+    col_boot_name, col_boot_ip = st.columns([1, 2])
+    with col_boot_name:
+        bootstrap_name = st.text_input(
+            "Bootstrap Name", value=config['install_env'].get('BOOTSTRAP_NAME', 'bootstrap'), key="bootstrap_name_input")
+        if bootstrap_name and not _is_valid_hostname(bootstrap_name):
+            st.error("❌ Invalid hostname")
+        elif bootstrap_name and bootstrap_name in _collect_all_node_names(config, exclude_prefix='BOOTSTRAP'):
+            st.error("❌ Duplicate hostname")
+        config['install_env']['BOOTSTRAP_NAME'] = bootstrap_name
+    with col_boot_ip:
         bootstrap_ip = st.text_input("Bootstrap IP (optional)", value=config['install_env'].get('BOOTSTRAP_IP', ''), key="bootstrap_ip_input")
         if bootstrap_ip and not _is_valid_ipv4(bootstrap_ip):
             st.error("❌ Invalid IP")
         config['install_env']['BOOTSTRAP_IP'] = bootstrap_ip
+    
+    # Gateway IP
+    st.markdown("**Gateway**")
+    gateway_ip = st.text_input("Gateway IP", value=config['install_env'].get('GATEWAY_IP', ''), key="gateway_ip_input")
+    if gateway_ip and not _is_valid_ipv4(gateway_ip):
+        st.error("❌ Invalid IP")
+    config['install_env']['GATEWAY_IP'] = gateway_ip
 
 def _render_network_config(config):
     """渲染 Machine/Cluster/Service Network 及 Network Type 的配置區塊"""
@@ -275,10 +357,25 @@ def _render_credentials(config):
     config['install_env']['REGISTRY_PASSWORD'] = st.text_input(
         "Registry Password", value=config['install_env']['REGISTRY_PASSWORD'], type="password", key="registry_pwd_input")
     
+    # 每次都從 install_source/.ssh/id_rsa.pub 讀取公鑰並覆蓋 UI
+    pubkey_path = os.path.join(CURRENT_DIR, 'install_source', '.ssh', 'id_rsa.pub')
+    ssh_default = ''
+    if os.path.exists(pubkey_path):
+        try:
+            with open(pubkey_path, 'r') as f:
+                ssh_default = f.read().strip()
+        except Exception:
+            ssh_default = ''
+    
+    if ssh_default:
+        config['install_env']['SSH_KEY'] = ssh_default
+    # 透過 session_state 覆蓋 widget 值（不可同時傳 value= 參數）
+    st.session_state['ssh_key_input'] = ssh_default
+    
     col1, col2 = st.columns(2)
     with col1:
-        ssh_input = st.text_area("SSH Public Key", value=config['install_env']['SSH_KEY'],
-                                  height=100, help="貼上 id_rsa.pub 內容或填寫路徑", key="ssh_key_input")
+        ssh_input = st.text_area("SSH Public Key",
+                                  height=100, help="自動讀取 install_source/.ssh/id_rsa.pub", key="ssh_key_input")
         if "ssh-" in ssh_input or "\n" in ssh_input:
             config['install_env']['SSH_KEY'] = ssh_input
         elif os.path.exists(ssh_input):
@@ -309,6 +406,18 @@ def _handle_form_submit(config_manager, config):
     elif not env.get('REGISTRY_PASSWORD'):
         st.error("Registry Password 不能為空")
     else:
+        # 驗證所有節點名稱
+        all_names = _collect_all_node_names(config)
+        if len(all_names) != len(set(all_names)):
+            st.error("❌ 有重複的節點名稱，請檢查")
+            return
+        
+        # 驗證名稱格式
+        invalid_names = [n for n in all_names if not _is_valid_hostname(n)]
+        if invalid_names:
+            st.error(f"❌ 節點名稱格式不正確: {', '.join(invalid_names)}")
+            return
+        
         tool_config = ConfigManager('tool_config.json').get_config()
         tool_version_info = tool_config.get('version_info', {})
         for key, value in tool_version_info.items():
@@ -324,9 +433,10 @@ def _sync_node_data(config):
     """將 session state 中的節點資料同步回 config 字典"""
     for prefix, count_key in [("MASTER", "master_count"), ("INFRA", "infra_count"), ("WORKER", "worker_count")]:
         for i in range(1, st.session_state[count_key] + 1):
-            for suffix in ["IP", "MAC", "INTERFACE", "DEVICE"]:
+            for suffix in ["NAME", "IP", "MAC", "INTERFACE", "DEVICE"]:
                 key = f"{prefix}{i:02d}_{suffix}"
-                state_key = f"{'ip' if suffix == 'IP' else 'mac' if suffix == 'MAC' else 'iface' if suffix == 'INTERFACE' else 'device'}_{key}"
+                state_prefix = 'name' if suffix == 'NAME' else 'ip' if suffix == 'IP' else 'mac' if suffix == 'MAC' else 'iface' if suffix == 'INTERFACE' else 'device'
+                state_key = f"{state_prefix}_{key}"
                 config['install_env'][key] = st.session_state.get(state_key, "")
 
 def _generate_yamls(config):

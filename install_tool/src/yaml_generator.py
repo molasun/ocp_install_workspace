@@ -261,8 +261,10 @@ class YAMLGenerator:
             for i in range(1, max_i):
                 ip = self._get_env(f"{prefix}{i:02d}_IP")
                 if ip:
+                    default_hostname = f"{prefix.lower()}-{i}"
+                    hostname = self._get_env(f"{prefix}{i:02d}_NAME", default_hostname)
                     hosts.append(self._build_host_entry(
-                        hostname=f"{prefix.lower()}-{i}", role=role, ip=ip,
+                        hostname=hostname, role=role, ip=ip,
                         mac=self._get_env(f"{prefix}{i:02d}_MAC", 'BC:24:11:99:B8:1B'),
                         interface=self._get_env(f"{prefix}{i:02d}_INTERFACE", 'ens18'),
                         device=self._get_env(f"{prefix}{i:02d}_DEVICE", '/dev/sda'),

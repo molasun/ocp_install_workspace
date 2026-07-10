@@ -58,13 +58,13 @@ def parse_host_config(config_data: dict) -> dict:
         host_config['dns_upstream'] = env['DNS_UPSTREAM']
     
     # Bastion
-    bastion = {'name': 'bastion'}
+    bastion = {'name': env.get('BASTION_NAME', 'bastion')}
     if 'BASTION_IP' in env:
         bastion['ip'] = env['BASTION_IP']
     host_config['bastion'] = bastion
     
     # Bootstrap
-    bootstrap = {'name': 'bootstrap'}
+    bootstrap = {'name': env.get('BOOTSTRAP_NAME', 'bootstrap')}
     if 'BOOTSTRAP_IP' in env and env['BOOTSTRAP_IP']:
         bootstrap['ip'] = env['BOOTSTRAP_IP']
     else:
@@ -118,8 +118,9 @@ def _parse_nodes(env: dict, prefix: str, default_interface: str, default_device:
     while True:
         ip_key = f'{prefix}{i:02d}_IP'
         if ip_key in env and env[ip_key]:
+            name_key = f'{prefix}{i:02d}_NAME'
             node = {
-                'name': f'{prefix.lower()}-{i-1}',
+                'name': env.get(name_key, f'{prefix.lower()}-{i-1}'),
                 'ip': env[ip_key],
                 'mac': env.get(f'{prefix}{i:02d}_MAC', ''),
                 'interface': env.get(f'{prefix}{i:02d}_INTERFACE', default_interface),

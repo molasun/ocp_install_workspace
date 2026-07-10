@@ -10,9 +10,15 @@
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
+
 * using python 3.12
 ```bash
 uv venv --python 3.12
+```
+
+* using python 3.12
+```bash
+uv pip install streamlit pyyaml
 ```
 
 ### How to start
