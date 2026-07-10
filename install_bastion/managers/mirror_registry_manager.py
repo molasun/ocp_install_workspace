@@ -142,8 +142,30 @@ class MirrorRegistryManager(BaseManager):
         success, stdout, stderr = self._run_command(install_cmd, timeout=600)
         
         if not success:
-            error_detail = (stderr or stdout)[:500]
-            return False, f"安裝失敗: {error_detail}"
+            # 將完整輸出存到檔案供診斷
+            log_path = os.path.join(self.config_dir, "mirror-registry-install-output.log")
+            try:
+                with open(log_path, 'w') as f:
+                    f.write(f"=== STDOUT ===\n{stdout}\n\n=== STDERR ===\n{stderr}\n")
+            except Exception:
+                pass
+
+            # 從 stdout（mirror-registry 主要輸出管道）提取最後 15 行作為錯誤摘要
+            raw_output = stderr if stderr else stdout
+            all_lines = [l for l in raw_output.split('\n') if l.strip()]
+            # 優先提取包含錯誤關鍵字的行
+            error_lines = [
+                l for l in all_lines
+                if any(kw in l.lower() for kw in ['error', 'fail', 'fatal', 'panic', 'cannot', 'unable'])
+            ]
+            if error_lines:
+                error_detail = '\n'.join(error_lines[:10])
+            else:
+                # Fallback：最後 15 行
+                error_detail = '\n'.join(all_lines[-15:]) if all_lines else raw_output[-500:]
+            
+            self._log(f"完整安裝輸出已儲存至: {log_path}", "INFO")
+            return False, f"安裝失敗: {error_detail}\n\n📄 完整日誌: {log_path}"
         
         self._trust_ca(quay_root)
         
