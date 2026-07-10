@@ -153,12 +153,13 @@ address=/api-int.{cluster_name}.{base_domain}/{bastion_ip}
         
         cluster_name = self.config.get('clusterName', 'ocp4')
         base_domain = self.config.get('baseDomain', 'example.com')
-        
+        bastion_name = self.config.get('bastion', {}).get('name', 'bastion')
+
         # 測試 DNS 解析
         test_records = [
             f"api.{cluster_name}.{base_domain}",
             f"api-int.{cluster_name}.{base_domain}",
-            f"bastion.{cluster_name}.{base_domain}",
+            f"{bastion_name}.{cluster_name}.{base_domain}",
         ]
         
         all_success = True

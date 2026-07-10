@@ -25,6 +25,10 @@ if 'env_ready' not in st.session_state:
     st.session_state.env_ready = False
 if 'tools_downloaded' not in st.session_state:
     st.session_state.tools_downloaded = False
+if 'ssh_keygen_done' not in st.session_state:
+    st.session_state.ssh_keygen_done = False
+if 'generated_ssh_pubkey' not in st.session_state:
+    st.session_state.generated_ssh_pubkey = None
 if 'cluster_configured' not in st.session_state:
     st.session_state.cluster_configured = False
 if 'operators_saved' not in st.session_state:

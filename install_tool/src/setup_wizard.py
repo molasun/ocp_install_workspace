@@ -172,6 +172,79 @@ class SetupWizard:
             log_error(f"創建失敗：{e}")
             return False
 
+    def run_ssh_keygen(self) -> Tuple[bool, Optional[str]]:
+        """
+        產生 SSH 金鑰對
+
+        在 {install_source_dir}/.ssh/ 下生成 id_rsa 與 id_rsa.pub。
+        若金鑰已存在則直接回傳成功，不重複生成。
+
+        Returns:
+            (是否成功, 公鑰檔案路徑)
+        """
+        ssh_dir = os.path.join(self.install_source_dir, '.ssh')
+        key_path = os.path.join(ssh_dir, 'id_rsa')
+        pub_key_path = f"{key_path}.pub"
+
+        # 確保 .ssh 目錄存在
+        os.makedirs(ssh_dir, exist_ok=True)
+
+        # 若金鑰已存在則跳過
+        if os.path.exists(key_path) and os.path.exists(pub_key_path):
+            log_info(f"SSH 金鑰已存在，跳過生成: {key_path}")
+            return True, pub_key_path
+
+        # 執行 ssh-keygen
+        cmd = [
+            'ssh-keygen', '-t', 'rsa', '-b', '4096',
+            '-C', 'install-automation',
+            '-f', key_path,
+            '-N', '',
+        ]
+
+        log_info(f"正在生成 SSH 金鑰: {key_path}")
+
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=30
+            )
+            if result.returncode != 0:
+                log_error(f"ssh-keygen 失敗: {result.stderr.strip()}")
+                return False, None
+        except subprocess.TimeoutExpired:
+            log_error("ssh-keygen 執行超時")
+            return False, None
+        except FileNotFoundError:
+            log_error("找不到 ssh-keygen 命令")
+            return False, None
+        except Exception as e:
+            log_error(f"ssh-keygen 執行異常: {e}")
+            return False, None
+
+        if not os.path.exists(pub_key_path):
+            log_error("ssh-keygen 完成但公鑰檔案不存在")
+            return False, None
+
+        log_success(f"SSH 金鑰已生成: {key_path}")
+        return True, pub_key_path
+
+    def get_ssh_pubkey(self) -> Optional[str]:
+        """
+        讀取已生成的 SSH 公鑰內容
+
+        Returns:
+            公鑰內容字串，若不存在則回傳 None
+        """
+        pub_key_path = os.path.join(self.install_source_dir, '.ssh', 'id_rsa.pub')
+        if not os.path.exists(pub_key_path):
+            return None
+        try:
+            with open(pub_key_path, 'r') as f:
+                return f.read().strip()
+        except Exception as e:
+            log_error(f"讀取公鑰失敗: {e}")
+            return None
+
     def run_get_tools(self, config: dict, progress_callback: Optional[Callable[[float], None]] = None) -> bool:
         """下載必要工具"""
         log_info("開始執行 get_tools...")

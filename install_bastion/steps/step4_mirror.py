@@ -3,6 +3,7 @@ import os
 import subprocess
 from managers.base_manager import BaseManager
 from managers.setup_manager import SetupManager
+from managers.agent_create_manager import AgentCreateManager
 
 
 def _check_registry_catalog(config_params: dict) -> tuple:
@@ -38,12 +39,63 @@ def _check_registry_catalog(config_params: dict) -> tuple:
     except Exception as e:
         return False, f"❌ 檢查失敗: {str(e)}"
 
+def _render_agent_image_section(config_params: dict):
+    """渲染 Agent Image 生成區塊"""
+    st.subheader("💿 Agent Image 生成")
+    st.markdown("透過 `openshift-install agent create image` 生成可開機 ISO 鏡像。")
+
+    manager = AgentCreateManager(config_params)
+
+    # 前置檢查
+    prereq_ok, prereq_msg = manager.check_prerequisites()
+
+    if not prereq_ok:
+        st.warning(f"⚠️ 尚未滿足生成條件：\n{prereq_msg}")
+        st.info("💡 請確認步驟3 已安裝 openshift-install，且 install_source/ocp/ 內有 install-config.yaml 與 agent-config.yaml")
+        return
+
+    st.success("✅ 所有必要檔案已就緒")
+
+    # 顯示工作目錄
+    work_dir = manager.work_dir
+    st.caption(f"📂 工作目錄: `{work_dir}`")
+
+    # 檢查 ISO 是否已存在
+    iso_exists, iso_path = manager.check_image_exists()
+
+    if iso_exists:
+        st.info(f"📦 Agent ISO 已存在: `{iso_path}`")
+
+    # 操作按鈕
+    col_gen, col_skip = st.columns([1, 2])
+
+    with col_gen:
+        button_label = "🔄 重新生成" if iso_exists else "🚀 生成 Agent Image"
+        if st.button(button_label, type="primary", use_container_width=True, key="btn_agent_create"):
+            with st.spinner("正在生成 Agent Image，請稍候（可能需要數分鐘）..."):
+                success, msg = manager.create_image()
+            if success:
+                st.success(f"✅ {msg}")
+                st.balloons()
+            else:
+                st.error(f"❌ {msg}")
+
+    with col_skip:
+        if st.button("⏭️ 跳過，繼續鏡像同步", use_container_width=True, key="btn_agent_skip"):
+            st.session_state.agent_image_skipped = True
+            st.rerun()
+
+    st.markdown("---")
+
 def render_step4_mirror():
     """步驟4: 鏡像同步"""
     st.header("🪞 步驟4: 鏡像同步")
     st.markdown("檢查必要檔案，確認無誤後在終端機中執行鏡像同步指令。")
     
     config_params = st.session_state.get('config_params', {})
+    
+    # === Agent Image 生成（最上層） ===
+    _render_agent_image_section(config_params)
     
     # 取得路徑
     install_source_dir = BaseManager._get_install_source_dir()

@@ -10,6 +10,7 @@ from managers.ntp_manager import NTPManager
 from managers.others_manager import OthersManager
 from managers.mirror_registry_manager import MirrorRegistryManager
 from managers.install_manager import InstallManager
+from managers.agent_create_manager import AgentCreateManager
 
 
 class SetupManager:
@@ -58,6 +59,10 @@ class SetupManager:
         self.install_manager = InstallManager(config, self.config_dir)
         self.install_manager.logs = self.logs
         self.install_manager.log_file = self.log_file
+        
+        self.agent_create_manager = AgentCreateManager(config, self.config_dir)
+        self.agent_create_manager.logs = self.logs
+        self.agent_create_manager.log_file = self.log_file
    
     def _log(self, message: str, level: str = "INFO"):
         """記錄日誌（委派給第一個 manager 的 logger）"""

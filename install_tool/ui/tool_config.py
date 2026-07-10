@@ -18,6 +18,8 @@ class SessionKeys:
     ENV_READY = 'env_ready'
     TOOLS_DOWNLOADED = 'tools_downloaded'
     CURRENT_VIEW = 'current_view'
+    SSH_KEYGEN_DONE = 'ssh_keygen_done'
+    SSH_PUBKEY = 'generated_ssh_pubkey'
 
 
 class ToolConfigUI:
@@ -47,6 +49,8 @@ class ToolConfigUI:
         config = self.config_manager.get_config()
         
         self._render_pull_secret_section()
+        st.divider()
+        self._render_ssh_keygen_section()
         st.divider()
         self._render_tool_config_section(config)
         self._render_operator_catalog_section(config)
@@ -151,6 +155,75 @@ class ToolConfigUI:
             else:
                 st.error("❌ 寫入失敗")
     
+    # === SSH Key Generation 區塊 ===
+
+    def _render_ssh_keygen_section(self) -> None:
+        """渲染 SSH 金鑰生成區塊"""
+        with st.expander("🔑 SSH Key Generation", expanded=True):
+            existing_pubkey = self.wizard.get_ssh_pubkey()
+
+            if existing_pubkey:
+                st.session_state[SessionKeys.SSH_KEYGEN_DONE] = True
+                st.session_state[SessionKeys.SSH_PUBKEY] = existing_pubkey
+
+            if st.session_state.get(SessionKeys.SSH_KEYGEN_DONE, False):
+                self._render_ssh_keygen_success(existing_pubkey)
+                return
+
+            self._render_ssh_keygen_instructions()
+
+            if st.button("🔑 Generate SSH Key Pair", type="primary"):
+                self._execute_ssh_keygen()
+
+    def _render_ssh_keygen_success(self, pubkey_content: Optional[str]) -> None:
+        """渲染 SSH 金鑰已存在的成功狀態"""
+        st.success("✅ SSH 金鑰已就緒")
+
+        key_path = os.path.join(self.wizard.install_source_dir, '.ssh', 'id_rsa')
+        st.caption(f" Private key: `{key_path}`")
+
+        if pubkey_content:
+            with st.expander("📋 Public Key (id_rsa.pub)"):
+                st.code(pubkey_content, language="text")
+
+        if st.button("🔄 重新生成"):
+            self._execute_ssh_keygen(force=True)
+
+    def _render_ssh_keygen_instructions(self) -> None:
+        """渲染 SSH 金鑰生成說明"""
+        st.markdown("""
+        生成 SSH 金鑰對，用於 OpenShift 安裝時的節點存取認證。
+
+        - **演算法**: RSA 4096
+        - **註解**: install-automation
+        - **存放路徑**: `install_source/.ssh/id_rsa`
+        - **Passphrase**: 無（自動化場景）
+
+        生成後的公鑰將自動套用至步驟2 的 Cluster Config SSH Key 欄位。
+        """)
+
+    def _execute_ssh_keygen(self, force: bool = False) -> None:
+        """執行 SSH 金鑰生成"""
+        if force:
+            ssh_dir = os.path.join(self.wizard.install_source_dir, '.ssh')
+            for fname in ['id_rsa', 'id_rsa.pub']:
+                fpath = os.path.join(ssh_dir, fname)
+                if os.path.exists(fpath):
+                    os.remove(fpath)
+
+        with st.spinner("正在生成 SSH 金鑰..."):
+            success, _ = self.wizard.run_ssh_keygen()
+
+        if success:
+            pubkey = self.wizard.get_ssh_pubkey()
+            st.session_state[SessionKeys.SSH_KEYGEN_DONE] = True
+            st.session_state[SessionKeys.SSH_PUBKEY] = pubkey
+            st.success("✅ SSH 金鑰已生成！")
+            time.sleep(1)
+            st.rerun()
+        else:
+            st.error("❌ SSH 金鑰生成失敗，請檢查 ssh-keygen 是否可用")
+
     # === 工具配置表單 ===
     
     def _render_tool_config_section(self, config: dict) -> None:
