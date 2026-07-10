@@ -52,12 +52,26 @@ class MirrorRegistryManager(BaseManager):
         return False, "Mirror Registry 未安裝"
     
     def _check_containers_running(self) -> bool:
-        """檢查 quay 相關容器是否實際在運行"""
+        """檢查 Quay 主服務是否實際在運行（port 8443 是否有服務監聽）"""
         success, stdout, _ = self._run_command(
-            "podman ps --filter 'name=quay' --format '{{.Names}}' 2>/dev/null || "
-            "docker ps --filter 'name=quay' --format '{{.Names}}' 2>/dev/null"
+            "ss -tlnp 2>/dev/null | grep ':8443' || netstat -tlnp 2>/dev/null | grep ':8443'"
         )
         return success and bool(stdout.strip())
+    
+    def _ensure_images_loaded(self) -> None:
+        """安全網：確保離線容器映像檔已載入 podman 本地存儲"""
+        install_source_dir = self._get_install_source_dir()
+        if not os.path.exists(install_source_dir):
+            return
+
+        for filename in os.listdir(install_source_dir):
+            if filename.endswith('.tar') and any(
+                kw in filename.lower() for kw in ['quay', 'redis', 'postgres']
+            ):
+                tar_path = os.path.join(install_source_dir, filename)
+                self._log(f"確保映像檔已載入: {tar_path}")
+                self._run_command(f"podman load -i {tar_path}", timeout=300)
+
     
     def install_podman(self) -> Tuple[bool, str]:
         """安裝 Podman"""
@@ -128,6 +142,9 @@ class MirrorRegistryManager(BaseManager):
     def _fresh_install(self, quay_root: str, quay_storage: str, bastion_fqdn: str, registry_password: str) -> Tuple[bool, str]:
         """執行全新安裝"""
         self._log("📦 Mirror Registry 開始全新安裝...")
+        
+        # 安全網：確保離線容器映像檔已載入（即使 step3 已載入也不重複）
+        self._ensure_images_loaded()
         
         mirror_registry_dir = self._find_mirror_registry_tar()
         if not mirror_registry_dir:

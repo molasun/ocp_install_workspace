@@ -222,6 +222,45 @@ class InstallManager(BaseManager):
             )
             self._log("已設定 oc bash completion")
     
+    def load_container_images(self) -> Tuple[bool, str]:
+        """從 install_source 載入容器映像檔 tar 到 podman 本地存儲"""
+        self._log("載入離線容器映像檔...")
+
+        if not os.path.exists(self._install_source_dir):
+            self._log("install_source 目錄不存在，跳過", "WARNING")
+            return True, "install_source 目錄不存在，跳過"
+
+        image_tars = []
+        for filename in os.listdir(self._install_source_dir):
+            # 容器映像檔 tar 的命名規則：quay-rhel8-v3.12.18.tar, redis-6-latest.tar 等
+            if filename.endswith('.tar') and any(
+                kw in filename.lower() for kw in ['quay', 'redis', 'postgres']
+            ):
+                image_tars.append(filename)
+
+        if not image_tars:
+            self._log("未找到容器映像檔 tar，跳過", "WARNING")
+            return True, "無容器映像檔需載入"
+
+        loaded = []
+        failed = []
+        for filename in sorted(image_tars):
+            tar_path = os.path.join(self._install_source_dir, filename)
+            self._log(f"載入映像檔: {tar_path}")
+            success, stdout, stderr = self._run_command(
+                f"podman load -i {tar_path}", timeout=300
+            )
+            if success:
+                loaded.append(filename)
+                self._log(f"已載入: {filename}")
+            else:
+                failed.append(f"{filename}: {stderr[:100]}")
+
+        if failed:
+            return False, f"部分映像檔載入失敗: {'; '.join(failed)}"
+
+        return True, f"已載入 {len(loaded)} 個映像檔: {', '.join(loaded)}"
+    
     def install_all_cli(self) -> Tuple[bool, str]:
         """安裝所有 CLI 工具"""
         self._log("開始安裝所有 CLI 工具...")
