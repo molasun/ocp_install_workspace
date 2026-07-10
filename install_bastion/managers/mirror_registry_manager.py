@@ -1,5 +1,6 @@
 import os
 import time
+import shutil
 from typing import Dict, Optional, Tuple
 from .base_manager import BaseManager
 
@@ -28,8 +29,7 @@ class MirrorRegistryManager(BaseManager):
         if success and stdout.strip():
             return True, f"Registry 容器運行中: {stdout.strip()}"
         
-        # 方法3: 檢查是否已安裝（容器存在但可能停止）
-        # 檢查 /opt/quay 目錄是否存在且包含配置
+        # 方法3: 檢查是否有已安裝但停止的容器（目錄 + 容器同時存在才算已安裝）
         quay_root = self.config.get('quayRoot', '/opt/quay')
         if os.path.exists(quay_root) and os.path.exists(f"{quay_root}/config"):
             success, stdout, _ = self._run_command(
@@ -38,7 +38,8 @@ class MirrorRegistryManager(BaseManager):
             )
             if success and stdout.strip():
                 return True, f"Registry 已安裝但未運行: {stdout.strip()}"
-            return True, "Registry 已安裝（目錄存在）"
+            # 目錄存在但無容器 → 視為未安裝（殘留目錄）
+            return False, "Mirror Registry 未安裝（發現殘留目錄但無容器）"
         
         # 方法4: curl 檢查
         success, stdout, _ = self._run_command(
@@ -109,10 +110,16 @@ class MirrorRegistryManager(BaseManager):
             if verify_success:
                 return True, "✅ Mirror Registry 已安裝，跳過安裝步驟。連線驗證成功"
             else:
-                return False, f"❌ Mirror Registry 已安裝但連線失敗: {verify_msg}"
+                # 驗證失敗：清理舊安裝並重新安裝
+                self._log(f"已安裝的 Registry 驗證失敗: {verify_msg}，開始清理並重新安裝...", "WARNING")
+                self._cleanup_installation(quay_root, quay_storage)
         
-        # === 未安裝，執行全新安裝 ===
-        self._log("📦 Mirror Registry 未安裝，開始全新安裝...")
+        # === 執行全新安裝 ===
+        return self._fresh_install(quay_root, quay_storage, bastion_fqdn, registry_password)
+    
+    def _fresh_install(self, quay_root: str, quay_storage: str, bastion_fqdn: str, registry_password: str) -> Tuple[bool, str]:
+        """執行全新安裝"""
+        self._log("📦 Mirror Registry 開始全新安裝...")
         
         mirror_registry_dir = self._find_mirror_registry_tar()
         if not mirror_registry_dir:
@@ -142,8 +149,8 @@ class MirrorRegistryManager(BaseManager):
         # 等待啟動
         time.sleep(10)
         for i in range(6):
-            installed, _ = self.check_installed()
-            if installed and "運行" in installed:
+            installed, msg = self.check_installed()
+            if installed and "運行" in msg:
                 break
             time.sleep(5)
         
@@ -152,6 +159,30 @@ class MirrorRegistryManager(BaseManager):
             return True, "✅ Mirror Registry 安裝成功，連線驗證通過"
         else:
             return False, f"安裝完成但連線失敗: {verify_msg}"
+    
+    def _cleanup_installation(self, quay_root: str, quay_storage: str) -> None:
+        """清理舊的 Mirror Registry 安裝"""
+        self._log("開始清理舊的 Mirror Registry 安裝...")
+        
+        # 停止並移除所有 quay 相關容器
+        self._run_command(
+            "podman ps -a --filter 'name=quay' --format '{{.Names}}' 2>/dev/null | "
+            "xargs -r podman rm -f 2>/dev/null || "
+            "docker ps -a --filter 'name=quay' --format '{{.Names}}' 2>/dev/null | "
+            "xargs -r docker rm -f 2>/dev/null"
+        )
+        self._log("已停止並移除 quay 容器")
+        
+        # 移除 quay 目錄
+        for dir_path in [quay_root, quay_storage]:
+            if os.path.exists(dir_path):
+                try:
+                    shutil.rmtree(dir_path)
+                    self._log(f"已移除目錄: {dir_path}")
+                except Exception as e:
+                    self._log(f"移除目錄失敗 {dir_path}: {e}", "WARNING")
+        
+        self._log("清理完成")
 
 
     def _find_mirror_registry_tar(self) -> Optional[str]:
@@ -229,16 +260,16 @@ class MirrorRegistryManager(BaseManager):
         return False
     
     def verify_connection(self) -> Tuple[bool, str]:
-        """驗證 Mirror Registry 連線"""
-        bastion_ip = self.config.get('bastion', {}).get('ip', '')
+        """驗證 Mirror Registry 連線（使用 FQDN，與安裝時一致）"""
+        bastion_name = self.config.get('bastion', {}).get('name', 'bastion')
+        cluster_name = self.config.get('clusterName', 'ocp4')
+        base_domain = self.config.get('baseDomain', 'example.com')
+        bastion_fqdn = f"{bastion_name}.{cluster_name}.{base_domain}"
         registry_password = self.config.get('registryPassword', 'password')
         
-        if not bastion_ip:
-            return False, "無法取得 Bastion IP"
-        
-        # 使用 IP 直接連線
+        # 使用 FQDN 連線（與安裝時的 --quayHostname 一致）
         login_cmd = (
-            f"podman login {bastion_ip}:8443 "
+            f"podman login {bastion_fqdn}:8443 "
             f"-u init -p {registry_password} "
             f"--tls-verify=false"
         )
