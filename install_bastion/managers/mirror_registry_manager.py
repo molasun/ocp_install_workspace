@@ -142,7 +142,8 @@ class MirrorRegistryManager(BaseManager):
         success, stdout, stderr = self._run_command(install_cmd, timeout=600)
         
         if not success:
-            return False, f"安裝失敗: {stderr[:500]}"
+            error_detail = (stderr or stdout)[:500]
+            return False, f"安裝失敗: {error_detail}"
         
         self._trust_ca(quay_root)
         
@@ -163,17 +164,40 @@ class MirrorRegistryManager(BaseManager):
     def _cleanup_installation(self, quay_root: str, quay_storage: str) -> None:
         """清理舊的 Mirror Registry 安裝"""
         self._log("開始清理舊的 Mirror Registry 安裝...")
-        
-        # 停止並移除所有 quay 相關容器
+
+        # 1. 優先使用官方 uninstall（正確停止容器、移除 volumes、清理 systemd）
+        uninstall_cmd = f"cd /tmp && ./mirror-registry uninstall --quayRoot {quay_root} -y"
+        success, stdout, stderr = self._run_command(uninstall_cmd, timeout=120)
+        if success:
+            self._log("官方 uninstall 執行完成")
+        else:
+            self._log(f"官方 uninstall 失敗或不適用，改用手動清理: {(stderr or stdout)[:200]}", "WARNING")
+
+            # 2. 手動停止並移除所有 quay 相關容器
+            self._run_command(
+                "podman ps -a --filter 'name=quay' --format '{{.Names}}' 2>/dev/null | "
+                "xargs -r podman rm -f 2>/dev/null || "
+                "docker ps -a --filter 'name=quay' --format '{{.Names}}' 2>/dev/null | "
+                "xargs -r docker rm -f 2>/dev/null"
+            )
+            self._log("已停止並移除 quay 容器")
+
+        # 3. 移除 podman volumes（PostgreSQL/Redis 持久化資料）
         self._run_command(
-            "podman ps -a --filter 'name=quay' --format '{{.Names}}' 2>/dev/null | "
-            "xargs -r podman rm -f 2>/dev/null || "
-            "docker ps -a --filter 'name=quay' --format '{{.Names}}' 2>/dev/null | "
-            "xargs -r docker rm -f 2>/dev/null"
+            "podman volume ls -q --filter name=quay 2>/dev/null | "
+            "xargs -r podman volume rm -f 2>/dev/null"
         )
-        self._log("已停止並移除 quay 容器")
-        
-        # 移除 quay 目錄
+        self._log("已移除 quay 相關 volumes")
+
+        # 4. 移除 systemd 服務檔案
+        for svc in ['quay-app.service', 'quay-postgres.service', 'quay-redis.service']:
+            svc_path = f"/etc/systemd/system/{svc}"
+            if os.path.exists(svc_path):
+                self._run_command(f"systemctl stop {svc} 2>/dev/null; rm -f {svc_path}")
+                self._log(f"已移除 systemd 服務: {svc}")
+        self._run_command("systemctl daemon-reload 2>/dev/null")
+
+        # 5. 移除 quay 目錄
         for dir_path in [quay_root, quay_storage]:
             if os.path.exists(dir_path):
                 try:
@@ -181,7 +205,7 @@ class MirrorRegistryManager(BaseManager):
                     self._log(f"已移除目錄: {dir_path}")
                 except Exception as e:
                     self._log(f"移除目錄失敗 {dir_path}: {e}", "WARNING")
-        
+
         self._log("清理完成")
 
 
