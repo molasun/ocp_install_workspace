@@ -51,6 +51,14 @@ class MirrorRegistryManager(BaseManager):
         
         return False, "Mirror Registry 未安裝"
     
+    def _check_containers_running(self) -> bool:
+        """檢查 quay 相關容器是否實際在運行"""
+        success, stdout, _ = self._run_command(
+            "podman ps --filter 'name=quay' --format '{{.Names}}' 2>/dev/null || "
+            "docker ps --filter 'name=quay' --format '{{.Names}}' 2>/dev/null"
+        )
+        return success and bool(stdout.strip())
+    
     def install_podman(self) -> Tuple[bool, str]:
         """安裝 Podman"""
         self._log("安裝 Podman...")
@@ -140,7 +148,7 @@ class MirrorRegistryManager(BaseManager):
         
         self._log(f"執行安裝...")
         success, stdout, stderr = self._run_command(install_cmd, timeout=600)
-        
+
         if not success:
             # 將完整輸出存到檔案供診斷
             log_path = os.path.join(self.config_dir, "mirror-registry-install-output.log")
@@ -149,26 +157,51 @@ class MirrorRegistryManager(BaseManager):
                     f.write(f"=== STDOUT ===\n{stdout}\n\n=== STDERR ===\n{stderr}\n")
             except Exception:
                 pass
-
-            # 從 stdout（mirror-registry 主要輸出管道）提取最後 15 行作為錯誤摘要
-            raw_output = stderr if stderr else stdout
-            all_lines = [l for l in raw_output.split('\n') if l.strip()]
-            # 優先提取包含錯誤關鍵字的行
-            error_lines = [
-                l for l in all_lines
-                if any(kw in l.lower() for kw in ['error', 'fail', 'fatal', 'panic', 'cannot', 'unable'])
-            ]
-            if error_lines:
-                error_detail = '\n'.join(error_lines[:10])
-            else:
-                # Fallback：最後 15 行
-                error_detail = '\n'.join(all_lines[-15:]) if all_lines else raw_output[-500:]
-            
             self._log(f"完整安裝輸出已儲存至: {log_path}", "INFO")
-            return False, f"安裝失敗: {error_detail}\n\n📄 完整日誌: {log_path}"
-        
+
+            # 安裝程式可能因健康檢查超時而返回 rc=1，但容器實際已部署
+            # 檢查容器是否在運行，若是則額外等待 Quay 就緒
+            self._log("安裝程式返回失敗，檢查容器是否實際已部署...", "WARNING")
+            container_running = self._check_containers_running()
+
+            if container_running:
+                # 容器已運行，Quay 可能只是需要更多時間初始化
+                self._log("容器已運行，額外等待 Quay 就緒（最多 5 分鐘）...")
+                self._trust_ca(quay_root)
+
+                for i in range(10):
+                    time.sleep(30)
+                    verify_success, verify_msg = self.verify_connection()
+                    if verify_success:
+                        self._log("Quay 在安裝程式超時後最終就緒！")
+                        return True, "✅ Mirror Registry 安裝成功（安裝程式超時但 Quay 最終就緒），連線驗證通過"
+                    self._log(f"等待 Quay 就緒... ({i+1}/10)")
+
+                # 5 分鐘後仍未就緒
+                return False, (
+                    f"安裝程式超時且 Quay 在額外等待後仍未就緒。\n"
+                    f"最後驗證結果: {verify_msg}\n\n"
+                    f"📄 完整日誌: {log_path}\n"
+                    f"💡 請檢查容器日誌: podman logs $(podman ps --filter name=quay --format '{{{{.Names}}}}' | head -1)"
+                )
+            else:
+                # 容器未運行，安裝確實失敗
+                raw_output = stderr if stderr else stdout
+                all_lines = [l for l in raw_output.split('\n') if l.strip()]
+                error_lines = [
+                    l for l in all_lines
+                    if any(kw in l.lower() for kw in ['error', 'fail', 'fatal', 'panic', 'cannot', 'unable'])
+                ]
+                if error_lines:
+                    error_detail = '\n'.join(error_lines[:10])
+                else:
+                    error_detail = '\n'.join(all_lines[-15:]) if all_lines else raw_output[-500:]
+
+                return False, f"安裝失敗: {error_detail}\n\n📄 完整日誌: {log_path}"
+
+        # 安裝程式成功返回
         self._trust_ca(quay_root)
-        
+
         # 等待啟動
         time.sleep(10)
         for i in range(6):
@@ -176,7 +209,7 @@ class MirrorRegistryManager(BaseManager):
             if installed and "運行" in msg:
                 break
             time.sleep(5)
-        
+
         verify_success, verify_msg = self.verify_connection()
         if verify_success:
             return True, "✅ Mirror Registry 安裝成功，連線驗證通過"
