@@ -141,6 +141,11 @@ def render_step3_cli_packages():
             'detail': f"openshift-install, oc client, oc-mirror",
             'method': 'install_cli', 'always_run': True
         },
+        'load_container_images': {
+            'icon': '🖼️', 'name': '載入離線容器映像檔',
+            'detail': 'Quay, Redis 等 podman 映像檔',
+            'method': 'load_container_images', 'always_run': True
+        },
         'setup_registry': {
             'icon': '🏗️', 'name': '安裝 Mirror Registry',
             'detail': 'Podman + Quay Registry',
