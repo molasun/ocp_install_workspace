@@ -581,7 +581,7 @@ class ToolConfigUI:
         if not st.session_state.get(SessionKeys.TOOLS_DOWNLOADED, False):
             return
 
-        with st.expander("📦 Container Images for Offline Use", expanded=True):
+        with st.expander("Step 5: 📦 Container Images for Offline Use", expanded=True):
             arch = config.get('version_info', {}).get('ARCHITECTURE', 'amd64')
 
             # 掃描需要的映像檔
@@ -641,8 +641,9 @@ class ToolConfigUI:
                 st.success("🎉 所有映像檔已就緒！")
 
     def _render_next_button(self) -> None:
-        """渲染下一步按鈕"""
-        if st.session_state.get(SessionKeys.TOOLS_DOWNLOADED, False):
+        """渲染下一步按鈕（需完成映像檔準備才能進入下一步）"""
+        if (st.session_state.get(SessionKeys.TOOLS_DOWNLOADED, False)
+                and st.session_state.get(SessionKeys.IMAGES_PREPARED, False)):
             st.divider()
             if st.button("➡️ Next: Cluster Config", use_container_width=True):
                 st.session_state[SessionKeys.CURRENT_VIEW] = 'cluster_config'
