@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import shutil
 from typing import Dict, Optional, Tuple
@@ -166,73 +167,151 @@ class MirrorRegistryManager(BaseManager):
         self._log(f"執行安裝...")
         success, stdout, stderr = self._run_command(install_cmd, timeout=600)
 
-        if not success:
-            # 將完整輸出存到檔案供診斷
-            log_path = os.path.join(self.config_dir, "mirror-registry-install-output.log")
-            try:
-                with open(log_path, 'w') as f:
-                    f.write(f"=== STDOUT ===\n{stdout}\n\n=== STDERR ===\n{stderr}\n")
-            except Exception:
-                pass
-            self._log(f"完整安裝輸出已儲存至: {log_path}", "INFO")
+        # 儲存完整輸出供診斷（無論成功或失敗）
+        log_path = os.path.join(self.config_dir, "mirror-registry-install-output.log")
+        try:
+            with open(log_path, 'w') as f:
+                f.write(f"=== STDOUT ===\n{stdout}\n\n=== STDERR ===\n{stderr}\n")
+        except Exception:
+            pass
 
-            # 安裝程式可能因健康檢查超時而返回 rc=1，但容器實際已部署
-            # 檢查容器是否在運行，若是則額外等待 Quay 就緒
-            self._log("安裝程式返回失敗，檢查容器是否實際已部署...", "WARNING")
-            container_running = self._check_containers_running()
-
-            if container_running:
-                # 容器已運行，Quay 可能只是需要更多時間初始化
-                self._log("容器已運行，額外等待 Quay 就緒（最多 5 分鐘）...")
-                self._trust_ca(quay_root)
-
-                for i in range(10):
-                    time.sleep(30)
-                    verify_success, verify_msg = self.verify_connection()
-                    if verify_success:
-                        self._log("Quay 在安裝程式超時後最終就緒！")
-                        return True, "✅ Mirror Registry 安裝成功（安裝程式超時但 Quay 最終就緒），連線驗證通過"
-                    self._log(f"等待 Quay 就緒... ({i+1}/10)")
-
-                # 5 分鐘後仍未就緒
-                return False, (
-                    f"安裝程式超時且 Quay 在額外等待後仍未就緒。\n"
-                    f"最後驗證結果: {verify_msg}\n\n"
-                    f"📄 完整日誌: {log_path}\n"
-                    f"💡 請檢查容器日誌: podman logs $(podman ps --filter name=quay --format '{{{{.Names}}}}' | head -1)"
-                )
-            else:
-                # 容器未運行，安裝確實失敗
-                raw_output = stderr if stderr else stdout
-                all_lines = [l for l in raw_output.split('\n') if l.strip()]
-                error_lines = [
-                    l for l in all_lines
-                    if any(kw in l.lower() for kw in ['error', 'fail', 'fatal', 'panic', 'cannot', 'unable'])
-                ]
-                if error_lines:
-                    error_detail = '\n'.join(error_lines[:10])
-                else:
-                    error_detail = '\n'.join(all_lines[-15:]) if all_lines else raw_output[-500:]
-
-                return False, f"安裝失敗: {error_detail}\n\n📄 完整日誌: {log_path}"
-
-        # 安裝程式成功返回
+        # 安裝程式成功或失敗，都先嘗試驗證
         self._trust_ca(quay_root)
 
         # 等待啟動
         time.sleep(10)
-        for i in range(6):
-            installed, msg = self.check_installed()
-            if installed and "運行" in msg:
-                break
-            time.sleep(5)
 
+        # 先嘗試直接驗證
         verify_success, verify_msg = self.verify_connection()
         if verify_success:
             return True, "✅ Mirror Registry 安裝成功，連線驗證通過"
+
+        # 直接驗證失敗，嘗試修復（Redis 密碼同步 + SQLite 重置）
+        self._log("初次驗證失敗，嘗試安裝後修復...", "WARNING")
+        self._post_install_recovery(quay_root)
+
+        # 修復後重試驗證（最多 5 分鐘）
+        for i in range(10):
+            time.sleep(30)
+            verify_success, verify_msg = self.verify_connection()
+            if verify_success:
+                self._log("修復後 Quay 就緒！")
+                return True, "✅ Mirror Registry 安裝成功（修復 Redis 密碼與 SQLite 後就緒），連線驗證通過"
+            self._log(f"修復後等待 Quay 就緒... ({i+1}/10)")
+
+        # 修復後仍未就緒
+        # 提取錯誤摘要
+        raw_output = stderr if stderr else stdout
+        all_lines = [l for l in raw_output.split('\n') if l.strip()]
+        error_lines = [
+            l for l in all_lines
+            if any(kw in l.lower() for kw in ['error', 'fail', 'fatal', 'panic', 'cannot', 'unable'])
+        ]
+        if error_lines:
+            error_detail = '\n'.join(error_lines[:10])
         else:
-            return False, f"安裝完成但連線失敗: {verify_msg}"
+            error_detail = '\n'.join(all_lines[-15:]) if all_lines else raw_output[-500:]
+
+        return False, (
+            f"安裝與修復後仍無法連線: {verify_msg}\n"
+            f"安裝輸出摘要: {error_detail}\n\n"
+            f"📄 完整日誌: {log_path}\n"
+            f"💡 請檢查容器日誌: journalctl -u quay-app.service --no-pager -n 30"
+        )
     
+    def _sync_redis_password(self, quay_root: str) -> bool:
+        """
+        從 Redis 容器取得實際密碼並同步到 Quay config.yaml
+
+        Redis 映像檔的 entrypoint 可能生成自己的隨機密碼，
+        導致與 Quay config 中的密碼不匹配。
+        """
+        # 1. 從 Redis 容器 env 取得實際的 REDIS_PASSWORD
+        success, stdout, _ = self._run_command(
+            "podman exec quay-redis env 2>/dev/null | grep REDIS_PASSWORD | cut -d= -f2"
+        )
+        if not success or not stdout.strip():
+            self._log("quay-redis 容器未運行或無法取得 REDIS_PASSWORD", "WARNING")
+            return False
+
+        actual_password = stdout.strip()
+
+        # 2. 讀取 Quay config.yaml
+        config_path = os.path.join(quay_root, 'quay-config', 'config.yaml')
+        if not os.path.exists(config_path):
+            self._log(f"Quay config 不存在: {config_path}", "WARNING")
+            return False
+
+        try:
+            with open(config_path, 'r') as f:
+                config_content = f.read()
+        except Exception as e:
+            self._log(f"讀取 config.yaml 失敗: {e}", "WARNING")
+            return False
+
+        # 3. 從 config 中找出 BUILDLOGS_REDIS 下的密碼
+        match = re.search(r'BUILDLOGS_REDIS:\s*\n\s*host:.*?\n\s*password:\s*(\S+)', config_content)
+        if not match:
+            self._log("config.yaml 中未找到 BUILDLOGS_REDIS 密碼", "WARNING")
+            return False
+
+        config_password = match.group(1)
+
+        if config_password == actual_password:
+            self._log("Redis 密碼已一致，無需同步")
+            return True
+
+        # 4. 用 sed 替換所有舊密碼為新密碼
+        self._log(f"同步 Redis 密碼到 config.yaml")
+        self._run_command(
+            f"sed -i 's/{config_password}/{actual_password}/g' {config_path}"
+        )
+        self._log("Redis 密碼同步完成")
+        return True
+
+    def _reset_sqlite_volume(self) -> bool:
+        """
+        重置 SQLite volume（清除部分初始化的資料庫）
+
+        Quay 首次啟動可能因 Redis 密碼不匹配而崩潰，
+        留下部分初始化的 SQLite 資料庫，導致重啟時 "table already exists" 錯誤。
+        """
+        self._log("重置 SQLite volume...")
+
+        # 1. 停止 Quay
+        self._run_command("systemctl stop quay-app 2>/dev/null")
+        time.sleep(2)
+
+        # 2. 移除 quay-app 容器（釋放 volume 佔用）
+        self._run_command("podman rm -f quay-app 2>/dev/null")
+
+        # 3. 移除 sqlite-storage volume
+        self._run_command("podman volume rm -f sqlite-storage 2>/dev/null")
+        self._log("已移除 sqlite-storage volume")
+
+        # 4. 重啟 Quay（systemd 會重新建立容器和 volume）
+        self._run_command("systemctl start quay-app")
+        self._log("已重啟 quay-app")
+
+        return True
+
+    def _post_install_recovery(self, quay_root: str) -> None:
+        """
+        安裝後修復：同步 Redis 密碼 + 重置 SQLite volume
+
+        處理 Redis 映像檔密碼不匹配及 SQLite 部分初始化的問題。
+        """
+        self._log("執行安裝後修復（Redis 密碼同步 + SQLite 重置）...")
+
+        # 1. 同步 Redis 密碼
+        self._sync_redis_password(quay_root)
+
+        # 2. 重置 SQLite volume
+        self._reset_sqlite_volume()
+
+        # 3. 等待 Quay 重新啟動並初始化
+        time.sleep(15)
+
     def _cleanup_installation(self, quay_root: str, quay_storage: str) -> None:
         """清理舊的 Mirror Registry 安裝（確保完全清除所有殘留）"""
         self._log("開始清理舊的 Mirror Registry 安裝...")
