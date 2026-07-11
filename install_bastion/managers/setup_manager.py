@@ -106,7 +106,6 @@ class SetupManager:
             # Install Manager
             'install_packages': self.install_manager.install_packages,
             'install_cli': self.install_manager.install_all_cli,
-            'load_container_images': self.install_manager.load_container_images,
             'install_openshift_install': self.install_manager.install_openshift_install_cli,
             'install_oc_client': self.install_manager.install_oc_client,
             'verify_installations': self.install_manager.verify_installations,
