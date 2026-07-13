@@ -222,6 +222,61 @@ class InstallManager(BaseManager):
             )
             self._log("已設定 oc bash completion")
     
+    def install_oc_mirror(self) -> Tuple[bool, str]:
+        """安裝 oc-mirror CLI"""
+        self._log("安裝 oc-mirror CLI...")
+
+        ocmirror_dir = self._get_tar_path('ocmirrorSource', 'oc-mirror.tar.gz')
+        self._log(f"使用安裝包: {ocmirror_dir}")
+
+        target_path = '/usr/bin/oc-mirror'
+
+        # 檢查是否已安裝
+        if os.path.exists(target_path):
+            success, stdout, _ = self._run_command(f"{target_path} version")
+            version = stdout.strip() if success else "unknown"
+            return True, f"oc-mirror 已安裝 (版本: {version})"
+
+        # 檢查安裝包
+        if not os.path.exists(ocmirror_dir):
+            found = self._search_tar_in_install_source('oc-mirror')
+            if found:
+                ocmirror_dir = found
+                self._log(f"在 install_source 中找到: {ocmirror_dir}")
+            else:
+                return False, f"找不到 oc-mirror 安裝包: {ocmirror_dir}"
+
+        # 列出 tar 內容
+        success, tar_content, _ = self._run_command(f"tar -tzf {ocmirror_dir}")
+        if not success:
+            return False, f"無法讀取 tar 檔案內容: {ocmirror_dir}"
+
+        tar_files = [f.strip() for f in tar_content.split('\n') if f.strip() and not f.strip().endswith('/')]
+        self._log(f"tar 包含 {len(tar_files)} 個檔案")
+
+        # 解壓安裝
+        success, _, err = self._run_command(f"tar -xzf {ocmirror_dir} -C /usr/bin/")
+        if not success:
+            return False, f"解壓 oc-mirror 失敗: {err}"
+
+        # 檢查解壓結果
+        if os.path.exists(target_path):
+            self._run_command(f"chmod +x {target_path}")
+            return True, "oc-mirror 安裝成功"
+
+        # 如果名稱不同則重新命名
+        for f in tar_files:
+            extracted_file = f"/usr/bin/{f}"
+            if os.path.exists(extracted_file):
+                self._log(f"重新命名 {extracted_file} -> {target_path}")
+                self._run_command(f"mv {extracted_file} {target_path}")
+                self._run_command(f"chmod +x {target_path}")
+
+                if os.path.exists(target_path):
+                    return True, "oc-mirror 安裝成功"
+
+        return False, f"oc-mirror 安裝後無法找到執行檔，tar 內容: {tar_files}"
+    
     def install_all_cli(self) -> Tuple[bool, str]:
         """安裝所有 CLI 工具"""
         self._log("開始安裝所有 CLI 工具...")
@@ -235,6 +290,10 @@ class InstallManager(BaseManager):
         # 安裝 oc client
         success, msg = self.install_oc_client()
         results.append(("oc client", success, msg))
+        
+        # 安裝 oc-mirror
+        success, msg = self.install_oc_mirror()
+        results.append(("oc-mirror", success, msg))
         
         # 彙總結果
         failed = [(name, msg) for name, success, msg in results if not success]
