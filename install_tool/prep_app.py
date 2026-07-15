@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 
+from i18n import render_lang_selector, init_language, t
 from ui.tool_config import show_tool_config_page
 from ui.cluster_config import show_cluster_config_page
 from ui.operators import show_operators_page
@@ -36,23 +37,26 @@ if 'operators_saved' not in st.session_state:
 
 
 def main():
+    init_language()
+    render_lang_selector()
+    
     # 側邊欄導航
     with st.sidebar:
-        st.title("🛠️ OpenShift Prep")
+        st.title(t('prep.sidebar_title'))
         st.markdown("---")
         
-        st.button("1. 🔧 Tool Config & Setup", use_container_width=True,
+        st.button(t('prep.nav.step1'), use_container_width=True,
                   key="nav_step1", disabled=False)
-        st.button("2. 🏗️ Cluster Config", use_container_width=True,
+        st.button(t('prep.nav.step2'), use_container_width=True,
                   key="nav_step2", disabled=not st.session_state.tools_downloaded)
-        st.button("3. 📦 Operators & CSI", use_container_width=True,
+        st.button(t('prep.nav.step3'), use_container_width=True,
                   key="nav_step3", disabled=not st.session_state.cluster_configured)
-        st.button("4. ✅ Final Review", use_container_width=True,
+        st.button(t('prep.nav.step4'), use_container_width=True,
                   key="nav_step4",
                   disabled=not os.path.exists(os.path.join(CONFIG_DIR, 'operators.json')))
 
         st.markdown("---")
-        st.write(f"**Current Step:** {st.session_state.current_view.replace('_', ' ').title()}")
+        st.write(t('prep.current_step', step=st.session_state.current_view.replace('_', ' ').title()))
 
     # 視圖路由
     if st.session_state.current_view == 'tool_config':

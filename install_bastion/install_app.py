@@ -5,6 +5,7 @@ import json
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+from i18n import render_lang_selector, init_language, t
 from steps.step1_config import render_step1_config
 from steps.step2_services import render_step2_services
 from steps.step3_cli_packages import render_step3_cli_packages
@@ -26,10 +27,10 @@ def load_cluster_config():
                 config = json.load(f)
             return config
         except Exception as e:
-            st.warning(f"載入 cluster_config.json 時發生錯誤: {str(e)}")
+            st.warning(t('app.config_error', error=str(e)))
             return None
     else:
-        st.info(f"未找到配置檔: {config_path}")
+        st.info(t('app.config_not_found', path=config_path))
         return None
 
 
@@ -217,13 +218,13 @@ def display_sidebar_progress():
     """側邊欄顯示進度"""
     with st.sidebar:
         st.markdown("---")
-        st.header("📋 安裝進度")
-        
+        st.header(t('app.sidebar.progress'))
+
         steps = [
-            ("步驟1: 環境配置確認", "step1_complete"),
-            ("步驟2: 基礎服務安裝", "step2_complete"),
-            ("步驟3: CLI與套件安裝", "step3_complete"),
-            ("步驟4: 鏡像同步", "step4_complete"),
+            (t('app.sidebar.step1'), "step1_complete"),
+            (t('app.sidebar.step2'), "step2_complete"),
+            (t('app.sidebar.step3'), "step3_complete"),
+            (t('app.sidebar.step4'), "step4_complete"),
         ]
         
         current = st.session_state.current_step
@@ -242,36 +243,39 @@ def display_config_summary():
     
     if config:
         with st.sidebar:
-            with st.expander("📄 已載入配置", expanded=False):
+            with st.expander(t('app.sidebar.loaded_config'), expanded=False):
                 version = config.get('versionInfo', {})
                 if version:
-                    st.markdown("**版本資訊**")
+                    st.markdown(t('app.sidebar.version_info'))
                     st.text(f"OCP: {version.get('ocpVersion', 'N/A')}")
                     st.text(f"Release: {version.get('ocpRelease', 'N/A')}")
-                
-                st.markdown("**叢集資訊**")
-                st.text(f"模式: {config.get('mode', 'N/A')}")
-                st.text(f"網域: {config.get('clusterName', 'N/A')}.{config.get('baseDomain', 'N/A')}")
-                
-                st.markdown("**節點摘要**")
-                st.text(f"Master: {len(config.get('master', []))} 個")
-                st.text(f"Worker: {len(config.get('worker', []))} 個")
-                st.text(f"Infra: {len(config.get('infra', []))} 個")
-                
+
+                st.markdown(t('app.sidebar.cluster_info'))
+                st.text(t('app.sidebar.mode', mode=config.get('mode', 'N/A')))
+                st.text(t('app.sidebar.domain', cluster=config.get('clusterName', 'N/A'), domain=config.get('baseDomain', 'N/A')))
+
+                st.markdown(t('app.sidebar.node_summary'))
+                st.text(t('app.sidebar.master_count', count=len(config.get('master', []))))
+                st.text(t('app.sidebar.worker_count', count=len(config.get('worker', []))))
+                st.text(t('app.sidebar.infra_count', count=len(config.get('infra', []))))
+
                 net = config.get('networkConfig', {})
                 if net:
-                    st.markdown("**網路配置**")
+                    st.markdown(t('app.sidebar.network_config'))
                     if 'networkType' in net:
-                        st.text(f"類型: {net['networkType']}")
+                        st.text(t('app.sidebar.network_type', type=net['networkType']))
 
 def main():
     """主入口函數"""
     st.set_page_config(
-        page_title="Bastion 安裝引導工具",
+        page_title=t('app.title'),
         page_icon="🔄",
         layout="wide",
         initial_sidebar_state="expanded"
     )
+
+    init_language()
+    render_lang_selector()
 
     st.markdown(
         """
@@ -288,7 +292,7 @@ def main():
     cluster_config = load_cluster_config()
     if cluster_config:
         host_config = parse_host_config(cluster_config)
-        st.sidebar.success("✅ 已載入 cluster_config.json")
+        st.sidebar.success(t('app.config_loaded'))
     else:
         host_config = None
     
@@ -296,7 +300,7 @@ def main():
     init_session_state(host_config)
     
     # 顯示主標題
-    st.title("🔄 Bastion 安裝引導工具")
+    st.title(t('app.title'))
     st.markdown("---")
     
     # 側邊欄
@@ -315,10 +319,10 @@ def main():
     elif current_step == 4:
         render_step4_mirror()
     elif current_step >= 5:
-        st.header("🎉 安裝完成")
-        st.success("所有步驟已完成！")
+        st.header(t('app.install_complete'))
+        st.success(t('app.all_done'))
         
-        if st.button("🔄 重新開始"):
+        if st.button(t('app.restart')):
             original_config = st.session_state.get('original_config', {})
             st.session_state.clear()
             st.session_state.original_config = original_config

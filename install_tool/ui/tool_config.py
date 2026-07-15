@@ -6,6 +6,7 @@ import time
 import re
 from typing import Optional, Callable, Any
 
+from i18n import t
 from src.config_manager import ConfigManager
 from src.setup_wizard import SetupWizard
 from src.registry_manager import RegistryManager
@@ -20,6 +21,7 @@ class SessionKeys:
     CURRENT_VIEW = 'current_view'
     SSH_KEYGEN_DONE = 'ssh_keygen_done'
     SSH_PUBKEY = 'generated_ssh_pubkey'
+    SELECTED_INDEXES = 'selected_indexes'
 
 
 class ToolConfigUI:
@@ -43,8 +45,8 @@ class ToolConfigUI:
     
     def render(self) -> None:
         """渲染整個工具配置頁面"""
-        st.title("1. 🔧 Tool Configuration & Environment Setup")
-        st.markdown("配置需要下載的工具版本，並執行環境初始化。")
+        st.title(t('tool.title'))
+        st.markdown(t('tool.subtitle'))
         
         config = self.config_manager.get_config()
         
@@ -61,7 +63,7 @@ class ToolConfigUI:
     
     def _render_pull_secret_section(self) -> None:
         """渲染 Pull Secret 上傳區塊"""
-        with st.expander("🔐 OpenShift Pull Secret Configuration", expanded=True):
+        with st.expander(t('tool.pull_secret.title'), expanded=True):
             if st.session_state.get(SessionKeys.PULL_SECRET_MERGED, False):
                 self._render_pull_secret_success()
                 return
@@ -74,27 +76,26 @@ class ToolConfigUI:
     
     def _render_pull_secret_success(self) -> None:
         """渲染 Pull Secret 已配置狀態"""
-        st.success("✅ Pull secret 已配置完成")
-        if st.button("🔄 重新上傳"):
+        st.success(t('tool.pull_secret.success'))
+        if st.button(t('tool.pull_secret.reupload')):
             st.session_state[SessionKeys.PULL_SECRET_MERGED] = False
             st.rerun()
     
     def _render_pull_secret_instructions(self) -> None:
         """渲染 Pull Secret 說明"""
-        st.markdown("""
-        請提供 OpenShift Pull Secret。
-        從 [Red Hat Console](https://console.redhat.com/openshift/install/pull-secret) 下載。
-        """)
+        st.markdown(t('tool.pull_secret.instructions'))
     
     def _get_pull_secret_input(self) -> Optional[dict]:
         """取得 Pull Secret 輸入"""
+        paste_label = t('tool.pull_secret.paste_json')
+        upload_label = t('tool.pull_secret.upload_file')
         upload_method = st.radio(
-            "選擇上傳方式",
-            ["📋 貼上 JSON 內容", "📁 上傳 pull-secret.txt"],
+            t('tool.pull_secret.upload_method'),
+            [paste_label, upload_label],
             horizontal=True
         )
         
-        if upload_method == "📋 貼上 JSON 內容":
+        if upload_method == paste_label:
             return self._get_pull_secret_from_text()
         else:
             return self._get_pull_secret_from_file()
@@ -102,7 +103,7 @@ class ToolConfigUI:
     def _get_pull_secret_from_text(self) -> Optional[dict]:
         """從文字框取得 Pull Secret"""
         pull_secret_text = st.text_area(
-            "Pull Secret (JSON)", height=200,
+            t('tool.pull_secret.json_label'), height=200,
             placeholder='{"auths":{"cloud.openshift.com":{...},...}}',
             key="pull_secret_text"
         )
@@ -110,56 +111,56 @@ class ToolConfigUI:
             try:
                 return json.loads(pull_secret_text)
             except json.JSONDecodeError:
-                st.error("❌ 無效的 JSON 格式")
+                st.error(t('tool.pull_secret.invalid_json'))
         return None
     
     def _get_pull_secret_from_file(self) -> Optional[dict]:
         """從上傳檔案取得 Pull Secret"""
         uploaded_file = st.file_uploader(
-            "上傳 pull-secret.txt",
+            t('tool.pull_secret.file_label'),
             type=["txt", "json"],
             key="pull_secret_file"
         )
         if uploaded_file:
             try:
                 data = json.loads(uploaded_file.read().decode('utf-8'))
-                st.success(f"✅ 已讀取: {uploaded_file.name}")
+                st.success(t('tool.pull_secret.file_read', name=uploaded_file.name))
                 return data
             except json.JSONDecodeError:
-                st.error("❌ 無效的 JSON 格式")
+                st.error(t('tool.pull_secret.invalid_json'))
         return None
     
     def _validate_and_apply_pull_secret(self, pull_secret_json: dict) -> None:
         """驗證並套用 Pull Secret"""
         if 'auths' not in pull_secret_json:
-            st.error("❌ 缺少 'auths' 欄位")
+            st.error(t('tool.pull_secret.missing_auths'))
             return
         
         registries = list(pull_secret_json['auths'].keys())
         required = ['quay.io', 'registry.redhat.io']
         missing = [r for r in required if r not in registries]
         
-        st.info(f"📋 包含 {len(registries)} 個 registry 認證")
+        st.info(t('tool.pull_secret.registry_count', count=len(registries)))
         
         if missing:
-            st.error(f"❌ 缺少必要認證：{', '.join(missing)}")
+            st.error(t('tool.pull_secret.missing_creds', missing=', '.join(missing)))
             return
         
-        st.success("✅ 包含 quay.io 和 registry.redhat.io 認證")
+        st.success(t('tool.pull_secret.has_creds'))
         
-        if st.button("🔗 套用 Pull Secret", type="primary"):
+        if st.button(t('tool.pull_secret.apply'), type="primary"):
             if self.wizard.apply_pull_secret(pull_secret_json):
                 st.session_state[SessionKeys.PULL_SECRET_MERGED] = True
                 st.session_state[SessionKeys.REGISTRY_LOGGED_IN] = True
                 st.rerun()
             else:
-                st.error("❌ 寫入失敗")
+                st.error(t('tool.pull_secret.write_failed'))
     
     # === SSH Key Generation 區塊 ===
 
     def _render_ssh_keygen_section(self) -> None:
         """渲染 SSH 金鑰生成區塊"""
-        with st.expander("🔑 SSH Key Generation", expanded=True):
+        with st.expander(t('tool.ssh.title'), expanded=True):
             existing_pubkey = self.wizard.get_ssh_pubkey()
 
             if existing_pubkey:
@@ -172,35 +173,26 @@ class ToolConfigUI:
 
             self._render_ssh_keygen_instructions()
 
-            if st.button("🔑 Generate SSH Key Pair", type="primary"):
+            if st.button(t('tool.ssh.generate'), type="primary"):
                 self._execute_ssh_keygen()
 
     def _render_ssh_keygen_success(self, pubkey_content: Optional[str]) -> None:
         """渲染 SSH 金鑰已存在的成功狀態"""
-        st.success("✅ SSH 金鑰已就緒")
+        st.success(t('tool.ssh.ready'))
 
         key_path = os.path.join(self.wizard.install_source_dir, '.ssh', 'id_rsa')
-        st.caption(f" Private key: `{key_path}`")
+        st.caption(t('tool.ssh.private_key', path=key_path))
 
         if pubkey_content:
-            with st.expander("📋 Public Key (id_rsa.pub)"):
+            with st.expander(t('tool.ssh.pubkey_preview')):
                 st.code(pubkey_content, language="text")
 
-        if st.button("🔄 重新生成"):
+        if st.button(t('tool.ssh.regenerate')):
             self._execute_ssh_keygen(force=True)
 
     def _render_ssh_keygen_instructions(self) -> None:
         """渲染 SSH 金鑰生成說明"""
-        st.markdown("""
-        生成 SSH 金鑰對，用於 OpenShift 安裝時的節點存取認證。
-
-        - **演算法**: RSA 4096
-        - **註解**: install-automation
-        - **存放路徑**: `install_source/.ssh/id_rsa`
-        - **Passphrase**: 無（自動化場景）
-
-        生成後的公鑰將自動套用至步驟2 的 Cluster Config SSH Key 欄位。
-        """)
+        st.markdown(t('tool.ssh.instructions'))
 
     def _execute_ssh_keygen(self, force: bool = False) -> None:
         """執行 SSH 金鑰生成"""
@@ -211,29 +203,29 @@ class ToolConfigUI:
                 if os.path.exists(fpath):
                     os.remove(fpath)
 
-        with st.spinner("正在生成 SSH 金鑰..."):
+        with st.spinner(t('tool.ssh.generating')):
             success, _ = self.wizard.run_ssh_keygen()
 
         if success:
             pubkey = self.wizard.get_ssh_pubkey()
             st.session_state[SessionKeys.SSH_KEYGEN_DONE] = True
             st.session_state[SessionKeys.SSH_PUBKEY] = pubkey
-            st.success("✅ SSH 金鑰已生成！")
+            st.success(t('tool.ssh.generated'))
             time.sleep(1)
             st.rerun()
         else:
-            st.error("❌ SSH 金鑰生成失敗，請檢查 ssh-keygen 是否可用")
+            st.error(t('tool.ssh.generate_failed'))
 
     # === 工具配置表單 ===
     
     def _render_tool_config_section(self, config: dict) -> None:
         """渲染工具版本配置表單"""
         with st.form("tool_config_form"):
-            st.subheader("Version Information")
+            st.subheader(t('tool.version.title'))
             
             updated_config = self._render_version_form_fields(config)
             
-            if st.form_submit_button("Save & Run Environment Setup"):
+            if st.form_submit_button(t('tool.version.save_run')):
                 self._execute_environment_setup(updated_config)
     
     def _render_version_form_fields(self, config: dict) -> dict:
@@ -242,25 +234,25 @@ class ToolConfigUI:
         
         with col1:
             config['version_info']['OCP_RELEASE'] = st.text_input(
-                "OCP Release (e.g. 4.20.8)",
+                t('tool.version.ocp_release'),
                 value=config['version_info']['OCP_RELEASE']
             )
             config['version_info']['RHEL_VERSION'] = st.selectbox(
-                "RHEL Version", ["rhel9", "rhel10"],
+                t('tool.version.rhel'), ["rhel9", "rhel10"],
                 index=0 if config['version_info']['RHEL_VERSION'] == 'rhel9' else 1
             )
         
         with col2:
             config['version_info']['ARCHITECTURE'] = st.selectbox(
-                "Architecture", ["amd64", "arm64"],
+                t('tool.version.arch'), ["amd64", "arm64"],
                 index=0 if config['version_info']['ARCHITECTURE'] == 'amd64' else 1
             )
             config['version_info']['HELM_VERSION'] = st.text_input(
-                "Helm Version",
+                t('tool.version.helm'),
                 value=config['version_info']['HELM_VERSION']
             )
             config['version_info']['MIRROR_REGISTRY_VERSION'] = st.text_input(
-                "Mirror Registry Version",
+                t('tool.version.mirror_registry'),
                 value=config['version_info']['MIRROR_REGISTRY_VERSION']
             )
         
@@ -269,7 +261,7 @@ class ToolConfigUI:
     def _execute_environment_setup(self, config: dict) -> None:
         """執行環境初始化流程"""
         self.config_manager.save_config(config)
-        st.success("配置已保存！開始執行環境初始化...")
+        st.success(t('tool.env.config_saved'))
         
         if not self._run_env_prep_step():
             return
@@ -278,23 +270,23 @@ class ToolConfigUI:
             return
         
         self._run_extract_binaries_step(config)
-        st.success("✅ tool_config 配置完成！")
+        st.success(t('tool.env.complete'))
     
     def _run_env_prep_step(self) -> bool:
         """執行環境準備步驟"""
-        with st.expander("Step 1: Environment Preparation", expanded=True):
+        with st.expander(t('tool.env.step1_title'), expanded=True):
             if self.wizard.run_env_prep():
                 st.session_state[SessionKeys.ENV_READY] = True
-                st.success("✅ env_prep 完成")
+                st.success(t('tool.env.step1_success'))
                 return True
             else:
-                st.error("❌ env_prep 失敗")
+                st.error(t('tool.env.step1_failed'))
                 st.stop()
                 return False
     
     def _run_download_tools_step(self, config: dict) -> bool:
         """執行工具下載步驟"""
-        with st.expander("Step 2: Download Tools", expanded=True):
+        with st.expander(t('tool.env.step2_title'), expanded=True):
             if not st.session_state.get(SessionKeys.ENV_READY):
                 return False
             
@@ -306,28 +298,28 @@ class ToolConfigUI:
             
             if success:
                 st.session_state[SessionKeys.TOOLS_DOWNLOADED] = True
-                st.success("✅ get_tools 完成")
+                st.success(t('tool.env.step2_success'))
             else:
-                st.error("❌ get_tools 失敗")
+                st.error(t('tool.env.step2_failed'))
                 st.stop()
             
             return success
     
     def _run_extract_binaries_step(self, config: dict) -> None:
         """執行二進位檔解壓步驟"""
-        with st.expander("Step 3: Extract binary", expanded=True):
+        with st.expander(t('tool.env.step3_title'), expanded=True):
             if not st.session_state.get(SessionKeys.TOOLS_DOWNLOADED):
                 return
             
             if self.wizard.run_untar_oc_mirror(config):
-                st.success("✅ untar_oc_mirror 完成")
+                st.success(t('tool.env.untar_mirror_success'))
             else:
-                st.error("❌ untar_oc_mirror 失敗")
+                st.error(t('tool.env.untar_mirror_failed'))
             
             if self.wizard.run_untar_grpcurl(config):
-                st.success("✅ untar_grpcurl 完成")
+                st.success(t('tool.env.untar_grpcurl_success'))
             else:
-                st.error("❌ untar_grpcurl 失敗")
+                st.error(t('tool.env.untar_grpcurl_failed'))
     
     # === Operator Catalog 區塊 ===
     
@@ -336,7 +328,7 @@ class ToolConfigUI:
         if not self._is_grpcurl_available():
             return
         
-        with st.expander("Step 4: Operator Registry & Index", expanded=True):
+        with st.expander(t('tool.catalog.title'), expanded=True):
             self._render_container_status()
             st.markdown("---")
             self._render_index_management(config)
@@ -353,25 +345,27 @@ class ToolConfigUI:
             if os.path.exists(path):
                 return True
         
-        st.warning("⚠️ grpcurl 未找到")
+        st.warning(t('tool.catalog.grpcurl_not_found'))
         return False
     
     def _render_container_status(self) -> None:
-        """渲染容器狀態區塊"""
-        st.subheader("🐳 Operator Registry 容器狀態")
+        """渲染容器狀態區塊（遍歷所有 index type）"""
+        st.subheader(t('tool.catalog.container_status'))
         
-        container_name = self._get_container_name()
+        config = self.config_manager.get_config()
         registry = self.wizard.registry
-        is_running = registry.check_container_running(container_name)
-        exists = registry.check_container_exists(container_name)
         
-        col_status, col_action = st.columns([2, 1])
-        
-        with col_status:
-            self._render_container_status_info(container_name, is_running, exists, registry)
-        
-        with col_action:
-            self._render_container_action_button(container_name, is_running, registry)
+        for index_type, index_info in RegistryManager.INDEX_TYPES.items():
+            container_name = self._get_container_name(index_type)
+            is_running = registry.check_container_running(container_name)
+            exists = registry.check_container_exists(container_name)
+            
+            with st.expander(f"{index_info['label']} (`{container_name}`)", expanded=False):
+                col_status, col_action = st.columns([2, 1])
+                with col_status:
+                    self._render_container_status_info(container_name, is_running, exists, registry)
+                with col_action:
+                    self._render_container_action_button(container_name, is_running, registry, index_type, config)
     
     def _render_container_status_info(
         self, 
@@ -382,97 +376,158 @@ class ToolConfigUI:
     ) -> None:
         """渲染容器狀態資訊"""
         if is_running:
-            st.success(f"✅ 容器運行中: `{name}`")
-            with st.expander("📋 容器詳細資訊", expanded=False):
+            st.success(t('tool.catalog.container_running', name=name))
+            with st.expander(t('tool.catalog.container_details'), expanded=False):
                 details = registry.get_container_details(name)
                 if details:
                     st.code(details, language="text")
                 
-                st.markdown("**最近日誌:**")
+                st.markdown(t('tool.catalog.recent_logs'))
                 logs = registry.get_container_logs(name)
                 if logs:
                     st.code(logs[-1000:], language="text")
                 else:
-                    st.caption("(無日誌輸出)")
+                    st.caption(t('tool.catalog.no_logs'))
         elif exists:
-            st.warning(f"⚠️ 容器已停止: `{name}`")
+            st.warning(t('tool.catalog.container_stopped', name=name))
         else:
-            st.info(f"📦 尚未啟動容器: `{name}`")
+            st.info(t('tool.catalog.container_not_started', name=name))
     
     def _render_container_action_button(
         self, 
         container_name: str, 
         is_running: bool, 
-        registry: RegistryManager
+        registry: RegistryManager,
+        index_type: str = 'redhat',
+        config: dict = None
     ) -> None:
         """渲染容器操作按鈕"""
         if is_running:
-            if st.button("🛑 停止容器", key="stop_container_btn", type="secondary", use_container_width=True):
-                with st.spinner("正在停止容器..."):
+            if st.button(t('tool.catalog.stop'), key=f"stop_container_btn_{index_type}", type="secondary", use_container_width=True):
+                with st.spinner(t('tool.catalog.stopping')):
                     if registry.stop_operator_registry(container_name):
-                        st.success(f"容器 {container_name} 已停止")
+                        st.success(t('tool.catalog.stopped', name=container_name))
                     else:
-                        st.error("停止容器失敗")
+                        st.error(t('tool.catalog.stop_failed'))
                     time.sleep(1)
                     st.rerun()
         else:
-            if st.button("🚀 啟動容器", key="start_container_btn", type="primary", use_container_width=True):
-                with st.spinner("正在啟動容器..."):
-                    config = self.config_manager.get_config()
-                    success, name, port = registry.start_operator_registry(config)
+            if st.button(t('tool.catalog.start'), key=f"start_container_btn_{index_type}", type="primary", use_container_width=True):
+                with st.spinner(t('tool.catalog.starting')):
+                    if config is None:
+                        config = self.config_manager.get_config()
+                    
+                    # 捕獲啟動過程中的所有狀態訊息（含錯誤）
+                    status_messages = []
+                    def capture_status(msg):
+                        status_messages.append(msg)
+                    
+                    success, name, port = registry.start_operator_registry(
+                        config, status_callback=capture_status, index_type=index_type
+                    )
                     if success:
-                        st.success(f"✅ 容器已啟動: `{name}` (port: {port})")
+                        st.success(t('tool.catalog.started', name=name, port=port))
                     else:
-                        st.error("❌ 容器啟動失敗")
+                        # 顯示最後幾條狀態訊息作為錯誤診斷
+                        st.error(t('tool.catalog.start_failed'))
+                        if status_messages:
+                            with st.expander(t('tool.catalog.start_error_detail'), expanded=True):
+                                for msg in status_messages[-10:]:
+                                    st.text(msg)
                     time.sleep(1)
                     st.rerun()
     
     def _render_index_management(self, config: dict) -> None:
         """渲染 Operator Index 管理"""
+        # 顯示 index 勾選區塊
+        selected_indexes = self._render_index_selection()
+        
         index_file = os.path.join(self.config_dir, self.INDEX_FILE)
         
         if os.path.exists(index_file):
-            self._render_existing_index(index_file, config)
+            self._render_existing_index(index_file, config, selected_indexes)
         else:
-            self._render_fetch_new_index(config)
+            self._render_fetch_new_index(config, selected_indexes)
     
-    def _render_existing_index(self, index_file: str, config: dict) -> None:
+    def _render_index_selection(self) -> list:
+        """渲染 Operator Index 勾選區塊"""
+        # 初始化 session state
+        if SessionKeys.SELECTED_INDEXES not in st.session_state:
+            st.session_state[SessionKeys.SELECTED_INDEXES] = ['redhat']
+        
+        st.markdown(f"**{t('tool.catalog.select_indexes')}**")
+        
+        cols = st.columns(4)
+        index_keys = list(RegistryManager.INDEX_TYPES.keys())
+        
+        for i, idx_type in enumerate(index_keys):
+            idx_info = RegistryManager.INDEX_TYPES[idx_type]
+            with cols[i]:
+                is_checked = idx_type in st.session_state[SessionKeys.SELECTED_INDEXES]
+                if st.checkbox(
+                    idx_info['label'],
+                    value=is_checked,
+                    key=f"idx_chk_{idx_type}"
+                ):
+                    if idx_type not in st.session_state[SessionKeys.SELECTED_INDEXES]:
+                        st.session_state[SessionKeys.SELECTED_INDEXES].append(idx_type)
+                else:
+                    if idx_type in st.session_state[SessionKeys.SELECTED_INDEXES]:
+                        st.session_state[SessionKeys.SELECTED_INDEXES].remove(idx_type)
+        
+        return st.session_state[SessionKeys.SELECTED_INDEXES]
+    
+    def _render_existing_index(self, index_file: str, config: dict, selected_indexes: list) -> None:
         """渲染已存在的索引"""
         try:
             with open(index_file, 'r') as f:
                 index_data = json.load(f)
             
+            # 統計各 index 的 package 數量
+            total_count = 0
+            index_details = []
+            for idx_type, idx_info in RegistryManager.INDEX_TYPES.items():
+                packages = index_data.get(idx_type, [])
+                count = len(packages)
+                total_count += count
+                has_data = count > 0
+                is_selected = idx_type in selected_indexes
+                status_icon = "✅" if has_data else "⬜"
+                sel_icon = "🔹" if is_selected else ""
+                index_details.append(f"{status_icon} {sel_icon} {idx_info['label']}: {count}")
+            
             col1, col2, col3 = st.columns([2, 1, 1])
             with col1:
-                st.success(f"✅ Operator Index 就緒 ({len(index_data)} packages)")
+                st.success(t('tool.catalog.index_ready', count=total_count))
+                for detail in index_details:
+                    st.caption(detail)
             with col2:
                 mtime = os.path.getmtime(index_file)
                 st.caption(f"🕐 {datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')}")
             with col3:
-                if st.button("🔄 刷新", key="refresh_grpc_btn", use_container_width=True):
-                    self._run_fetch_with_progress(config, "🔄 正在刷新 Operator Index...")
+                if st.button(t('tool.catalog.refresh'), key="refresh_grpc_btn", use_container_width=True):
+                    if not selected_indexes:
+                        st.warning(t('tool.catalog.no_index_selected'))
+                        return
+                    self._run_fetch_with_progress(config, t('tool.catalog.refreshing'), selected_indexes)
         except Exception as e:
-            st.error(f"讀取快取失敗: {e}")
+            st.error(t('tool.catalog.read_cache_failed', error=e))
     
-    def _render_fetch_new_index(self, config: dict) -> None:
+    def _render_fetch_new_index(self, config: dict, selected_indexes: list) -> None:
         """渲染首次獲取索引"""
-        st.info("📡 尚未獲取 Operator Index")
-        st.markdown("""
-        ### 🔄 獲取流程：
-        1. 📦 確認 Local Registry 容器已啟動
-        2. 📡 透過 gRPC 查詢 Operator 目錄
-        3. 💾 儲存為 operator_index.json
+        st.info(t('tool.catalog.not_fetched'))
+        st.markdown(t('tool.catalog.fetch_flow'))
         
-        ⚠️ **注意：獲取完成後容器不會自動關閉，請手動關閉。**
-        """)
-        
-        if st.button("🚀 開始獲取 Operator Index (gRPC)", type="primary", use_container_width=True):
-            self._run_fetch_with_progress(config, "📡 正在獲取 Operator Index...")
+        if st.button(t('tool.catalog.fetch_start'), type="primary", use_container_width=True):
+            if not selected_indexes:
+                st.warning(t('tool.catalog.no_index_selected'))
+                return
+            self._run_fetch_with_progress(config, t('tool.catalog.fetching'), selected_indexes)
     
-    def _run_fetch_with_progress(self, config: dict, title: str) -> None:
+    def _run_fetch_with_progress(self, config: dict, title: str, selected_indexes: list) -> None:
         """執行查詢並顯示進度"""
         with st.status(title, expanded=True) as status_container:
-            progress_bar = st.progress(0, "準備開始...")
+            progress_bar = st.progress(0, t('tool.catalog.preparing'))
             status_text = st.empty()
             log_container = st.container()
             all_logs = []
@@ -484,7 +539,7 @@ class ToolConfigUI:
                 self._update_progress(msg, progress_bar, status_text)
             
             success = self.wizard.run_get_operator_catalog_via_grpc(
-                config, status_callback=update_status
+                config, status_callback=update_status, selected_indexes=selected_indexes
             )
             
             if success:
@@ -500,12 +555,12 @@ class ToolConfigUI:
         logs: list
     ) -> None:
         """處理查詢成功"""
-        progress_bar.progress(100, "完成!")
-        status_text.success("🎉 Operator Index 獲取完成!")
-        container.update(label="✅ 完成!", state="complete", expanded=False)
+        progress_bar.progress(100, t('tool.catalog.done'))
+        status_text.success(t('tool.catalog.fetch_complete'))
+        container.update(label=t('tool.catalog.done'), state="complete", expanded=False)
         st.balloons()
         
-        with st.expander("📋 執行日誌", expanded=False):
+        with st.expander(t('tool.catalog.execution_log'), expanded=False):
             st.code("\n".join(logs), language="text")
         
         time.sleep(2)
@@ -521,19 +576,13 @@ class ToolConfigUI:
         """處理查詢失敗"""
         progress_bar.empty()
         status_text.empty()
-        container.update(label="❌ 失敗", state="error", expanded=True)
-        st.error("❌ Operator Index 獲取失敗")
+        container.update(label=t('tool.catalog.failed'), state="error", expanded=True)
+        st.error(t('tool.catalog.fetch_failed'))
         
-        with st.expander("📋 完整執行日誌 (用於除錯)", expanded=True):
+        with st.expander(t('tool.catalog.debug_log'), expanded=True):
             st.code("\n".join(logs), language="text")
         
-        st.warning("""
-        ### 💡 除錯建議：
-        1. 確認容器是否正常運行
-        2. 檢查 gRPC 埠：`grpcurl -plaintext 127.0.0.1:50051 list`
-        3. 檢查容器日誌：`podman logs operator-registry-4.20`
-        4. 確認 SELinux：`getenforce`（應為 Permissive）
-        """)
+        st.warning(t('tool.catalog.debug_tips'))
     
     def _update_progress(self, msg: str, progress_bar: Any, status_text: Any) -> None:
         """更新進度條"""
@@ -561,7 +610,7 @@ class ToolConfigUI:
             if condition:
                 progress_bar.progress(rule[1], rule[2])
                 if "拉取鏡像" in msg:
-                    status_text.info("📥 鏡像不存在，正在拉取... (可能需要 3-10 分鐘)")
+                    status_text.info(t('tool.catalog.pulling_image'))
                 break
         
         # 特殊處理：百分比進度
@@ -570,24 +619,24 @@ class ToolConfigUI:
             if match:
                 current, total = int(match.group(1)), int(match.group(2))
                 pct = 70 + int((current / total) * 20)
-                progress_bar.progress(pct, f"處理中... ({current}/{total})")
+                progress_bar.progress(pct, t('tool.catalog.processing', current=current, total=total))
     
     def _render_next_button(self) -> None:
         """渲染下一步按鈕"""
         if st.session_state.get(SessionKeys.TOOLS_DOWNLOADED, False):
             st.divider()
-            if st.button("➡️ Next: Cluster Config", use_container_width=True):
+            if st.button(t('tool.next_cluster'), use_container_width=True):
                 st.session_state[SessionKeys.CURRENT_VIEW] = 'cluster_config'
                 st.rerun()
     
-    def _get_container_name(self) -> str:
+    def _get_container_name(self, index_type: str = 'redhat') -> str:
         """取得容器名稱"""
         config = self.config_manager.get_config()
         v_info = config.get('version_info', {})
         ocp_release = v_info.get('OCP_RELEASE', RegistryManager.DEFAULT_OCP_RELEASE)
         match = re.match(r'(\d+\.\d+)', ocp_release)
         ocp_version = match.group(1) if match else RegistryManager.DEFAULT_OCP_VERSION
-        return RegistryManager.CONTAINER_NAME_TEMPLATE.format(version=ocp_version)
+        return RegistryManager.CONTAINER_NAME_TEMPLATE.format(index_type=index_type, version=ocp_version)
 
 
 # === 模組級函數（向後相容） ===
@@ -602,6 +651,6 @@ def render_next_button():
     """渲染下一步按鈕（向後相容）"""
     if st.session_state.get(SessionKeys.TOOLS_DOWNLOADED, False):
         st.divider()
-        if st.button("➡️ Next: Cluster Config", use_container_width=True):
+        if st.button(t('tool.next_cluster'), use_container_width=True):
             st.session_state[SessionKeys.CURRENT_VIEW] = 'cluster_config'
             st.rerun()

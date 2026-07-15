@@ -2,6 +2,7 @@ import streamlit as st
 import time
 import os
 import subprocess
+from i18n import t
 from managers.setup_manager import SetupManager
 from managers.base_manager import BaseManager 
 
@@ -46,7 +47,7 @@ def _check_file_exists(install_source_dir: str, filename: str) -> tuple:
 
 def render_step3_cli_packages():
     """步驟3: CLI、套件與 Mirror Registry 安裝"""
-    st.header("📦 步驟3: CLI 工具、基礎套件與 Mirror Registry 安裝")
+    st.header(t('step3.header'))
     
     file_paths = st.session_state.get('file_paths', {})
     install_options = st.session_state.get('install_options', {})
@@ -59,7 +60,7 @@ def render_step3_cli_packages():
 
     install_source_dir = BaseManager._get_install_source_dir()
 
-    st.subheader("🔧 安裝參數（來自 Cluster Config）")
+    st.subheader(t('step3.params_title'))
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -71,16 +72,16 @@ def render_step3_cli_packages():
     with col4:
         st.text_input("RHEL Version", value=rhel, disabled=True, key="disp_rhel")
     
-    st.caption(f"📁 安裝來源目錄: `{install_source_dir}`")
+    st.caption(t('step3.source_dir', dir=install_source_dir))
 
     st.markdown("---")
-    st.subheader("📁 安裝包檔案檢查")
+    st.subheader(t('step3.file_check'))
     
     tar_types = {
-        'openshift-install': 'OCP 安裝 CLI (openshift-install)',
-        'openshift-client': 'OCP 客戶端 CLI (oc client)',
-        'oc-mirror': 'OC Mirror 工具',
-        'mirror-registry': 'Mirror Registry',
+        'openshift-install': t('step3.tar_install'),
+        'openshift-client': t('step3.tar_client'),
+        'oc-mirror': t('step3.tar_mirror'),
+        'mirror-registry': t('step3.tar_registry'),
     }
 
     file_status = {}  # 儲存每個檔案的狀態
@@ -104,23 +105,23 @@ def render_step3_cli_packages():
         if exists:
             st.success(f"✅ **{label}**: `{filename}` ({size_str})")
         else:
-            st.error(f"❌ **{label}**: `{filename}` - **檔案不存在！**")
+            st.error(f"❌ **{label}**: `{filename}` - {t('step3.file_not_found')}")
             all_files_ok = False
     
     # 如果所有檔案都存在，顯示摘要
     if all_files_ok:
-        st.success("🎉 所有必要安裝包已就緒！")
+        st.success(t('step3.all_ready'))
 
     st.markdown("---")
 
     # === Quay 配置 ===
     if install_options.get('registry_configure', False):
-        st.subheader("Quay Registry 配置")
+        st.subheader(t('step3.quay_config'))
         col_q1, col_q2 = st.columns(2)
         with col_q1:
-            quay_root = st.text_input("Quay 根目錄", value=file_paths.get('quayRoot', '/opt/quay'))
+            quay_root = st.text_input(t('step3.quay_root'), value=file_paths.get('quayRoot', '/opt/quay'))
         with col_q2:
-            quay_storage = st.text_input("Quay 儲存目錄", value=file_paths.get('quayStorage', '/opt/quay-storage'))
+            quay_storage = st.text_input(t('step3.quay_storage'), value=file_paths.get('quayStorage', '/opt/quay-storage'))
     else:
         quay_root = file_paths.get('quayRoot', '/opt/quay')
         quay_storage = file_paths.get('quayStorage', '/opt/quay-storage')
@@ -128,21 +129,21 @@ def render_step3_cli_packages():
     st.markdown("---")
     
     # === 任務定義 ===
-    st.subheader("📋 本步驟將執行的操作")
+    st.subheader(t('step3.tasks_title'))
     
     tasks_config = {
         'install_packages': {
-            'icon': '📦', 'name': '安裝基礎套件',
+            'icon': '📦', 'name': t('step3.task_packages'),
             'detail': 'net-tools, git, httpd',
             'method': 'install_packages', 'always_run': True
         },
         'install_cli': {
-            'icon': '🔧', 'name': '安裝 CLI 工具',
+            'icon': '🔧', 'name': t('step3.task_cli'),
             'detail': f"openshift-install, oc client, oc-mirror",
             'method': 'install_cli', 'always_run': True
         },
         'setup_registry': {
-            'icon': '🏗️', 'name': '安裝 Mirror Registry',
+            'icon': '🏗️', 'name': t('step3.task_registry'),
             'detail': 'Podman + Quay Registry',
             'method': 'setup_registry', 'condition': 'registry_configure'
         }
@@ -171,9 +172,9 @@ def render_step3_cli_packages():
     with col_btn1:
         if not st.session_state.step3_executed:
             if not all_files_ok:
-                st.warning("⚠️ 請確認所有安裝包檔案存在後再執行")
+                st.warning(t('step3.confirm_files'))
             
-            if st.button("🚀 開始安裝", type="primary", disabled=not all_files_ok):
+            if st.button(t('step3.start_install'), type="primary", disabled=not all_files_ok):
                 # 更新檔案路徑到 session state
                 _update_file_paths(file_status, quay_root, quay_storage, install_source_dir, arch, rhel, ocp_release)
                 
@@ -183,7 +184,7 @@ def render_step3_cli_packages():
 
     if st.session_state.step3_executed:
         st.markdown("---")
-        st.subheader("📊 執行結果")
+        st.subheader(t('step3.results'))
         
         results = st.session_state.step3_results
         success_count = sum(1 for r in results.values() if r.get('success', False))
@@ -191,7 +192,7 @@ def render_step3_cli_packages():
         
         col_prog1, col_prog2 = st.columns([1, 3])
         with col_prog1:
-            st.metric("完成進度", f"{success_count}/{total_count}")
+            st.metric(t('step3.progress'), f"{success_count}/{total_count}")
         
         for method, result in results.items():
             task_name = method
@@ -205,28 +206,28 @@ def render_step3_cli_packages():
                 if method == 'setup_registry':
                     msg = result.get('message', '')
                     if '驗證通過' in msg or '驗證成功' in msg or '連線成功' in msg:
-                        st.info("🔐 Mirror Registry 已可使用，請在步驟4進行鏡像同步")
+                        st.info(t('step3.registry_ready'))
                     elif '已安裝' in msg or '跳過' in msg:
-                        st.info("🔐 Mirror Registry 已安裝，請在步驟4進行鏡像同步")
+                        st.info(t('step3.registry_installed'))
                     else:
-                        st.warning("⚠️ Mirror Registry 安裝完成但驗證未通過，請檢查 DNS 設定")
+                        st.warning(t('step3.registry_verify_failed'))
             else:
                 st.error(f"{task_name}: {result.get('message', '')}")
         
         if success_count == total_count:
-            st.success("🎉 所有套件和工具安裝成功！")
+            st.success(t('step3.all_success'))
             _display_installation_verification()
             if install_options.get('mirror_enable', False):
-                st.info("💡 鏡像同步選項已啟用，將在步驟4進行鏡像同步。")
+                st.info(t('step3.mirror_enabled'))
         else:
-            st.warning("⚠️ 部分安裝失敗，請檢查上方錯誤訊息。")
+            st.warning(t('step3.some_failed'))
  
     # === 導航按鈕 ===
     st.markdown("---")
     col_nav1, col_nav2, col_nav3 = st.columns([1, 1, 2])
     
     with col_nav1:
-        if st.button("⬅️ 返回步驟2", use_container_width=True):
+        if st.button(t('step3.back_step2'), use_container_width=True):
             st.session_state.current_step = 2
             st.rerun()
     
@@ -234,7 +235,7 @@ def render_step3_cli_packages():
         if st.session_state.step3_executed:
             results = st.session_state.step3_results
             all_success = all(r.get('success', False) for r in results.values())
-            btn_label = "➡️ 進入步驟4" if all_success else "➡️ 跳過失敗，進入步驟4"
+            btn_label = t('step3.next_step4') if all_success else t('step3.skip_step4')
             btn_type = "primary" if all_success else "secondary"
             if st.button(btn_label, type=btn_type, use_container_width=True):
                 st.session_state.step3_complete = True
@@ -245,7 +246,7 @@ def render_step3_cli_packages():
         results = st.session_state.step3_results
         if any(not r.get('success', False) for r in results.values()):
             with col_nav3:
-                if st.button("🔄 重新執行所有步驟", use_container_width=True):
+                if st.button(t('step3.retry_all'), use_container_width=True):
                     st.session_state.step3_executed = False
                     st.session_state.step3_results = {}
                     st.rerun()
@@ -284,10 +285,10 @@ def _execute_step3_tasks(manager, active_tasks):
     for i, task in enumerate(active_tasks):
         task_name = f"{task['icon']} {task['name']}"
         method = task['method']
-        status_text.text(f"正在執行: {task_name}...")
+        status_text.text(t('step3.executing', task=task_name))
         
         with st.expander(f"{task_name}", expanded=True):
-            st.info("⏳ 執行中...")
+            st.info(t('step3.executing_status'))
             success, message = manager.execute_step(method)
             
             if success:
@@ -296,19 +297,19 @@ def _execute_step3_tasks(manager, active_tasks):
                 st.error(f"❌ {message}")
                 col_r, col_s = st.columns(2)
                 with col_r:
-                    if st.button("🔄 重試", key=f"retry_{method}"):
+                    if st.button(t('step3.retry'), key=f"retry_{method}"):
                         retry_success, retry_message = manager.execute_step(method)
                         if retry_success:
                             st.success(f"✅ {retry_message}")
                             success, message = True, retry_message
                         else:
-                            st.error(f"❌ 重試仍失敗: {retry_message}")
+                            st.error(t('step3.retry_failed', msg=retry_message))
                         st.rerun()
                 with col_s:
-                    if st.button("⏭️ 跳過", key=f"skip_{method}"):
-                        st.warning(f"⏭️ 已跳過: {task_name}")
+                    if st.button(t('step3.skip'), key=f"skip_{method}"):
+                        st.warning(t('step3.skipped', task=task_name))
                         st.session_state.step3_results[method] = {
-                            'success': False, 'message': f'已跳過: {message}', 'skipped': True
+                            'success': False, 'message': t('step3.skipped', task=message), 'skipped': True
                         }
                         continue
             
@@ -317,12 +318,12 @@ def _execute_step3_tasks(manager, active_tasks):
         progress_bar.progress((i + 1) / total)
         time.sleep(0.3)
     
-    status_text.text("✅ CLI 與套件安裝程序完成！")
+    status_text.text(t('step3.complete'))
 
 def _display_installation_verification():
     """顯示安裝後的版本驗證"""
     st.markdown("---")
-    st.subheader("🔍 安裝驗證")
+    st.subheader(t('step3.verification'))
     
     for cmd, label in [
         (['openshift-install', 'version'], 'openshift-install'),
@@ -335,8 +336,8 @@ def _display_installation_verification():
                 version_line = result.stdout.strip().split('\n')[0] if label == 'oc client' else result.stdout.strip()
                 st.text(f"✅ {label}: {version_line}")
             else:
-                st.text(f"⚠️ {label}: 無法取得版本")
+                st.text(t('step3.version_unavailable', label=label))
         except FileNotFoundError:
-            st.text(f"❌ {label}: 未安裝")
+            st.text(t('step3.not_installed', label=label))
         except Exception:
-            st.text(f"⚠️ {label}: 檢查失敗")
+            st.text(t('step3.check_failed', label=label))

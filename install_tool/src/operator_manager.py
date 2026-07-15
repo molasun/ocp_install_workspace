@@ -10,6 +10,9 @@ from src.logger import log_info, log_error
 class OperatorManager:
     """統一的 Operator 管理類別，整合查詢和版本管理"""
     
+    # 所有支援的 index 類型
+    ALL_INDEX_TYPES = ['redhat', 'certified', 'community', 'marketplace']
+    
     def __init__(self, current_dir=None):
         self.current_dir = current_dir or os.getcwd()
         self.config_dir = os.path.join(self.current_dir, 'config')
@@ -121,78 +124,102 @@ class OperatorManager:
         return packages
     
     def load_operator_index(self):
-        """載入 operator_index.json"""
+        """載入 operator_index.json（dict 結構，按 index_type 分區）"""
         if os.path.exists(self.index_file):
             with open(self.index_file, 'r', encoding='utf-8') as f:
                 return json.load(f)
         return None
     
-    def save_operator_index(self, packages):
-        """儲存 operator_index.json"""
+    def save_operator_index(self, packages, index_type):
+        """
+        儲存 operator_index.json（按 index_type 分區合併）
+        
+        Args:
+            packages: 該 index_type 下的 package 列表
+            index_type: index 類型 (redhat/certified/community/marketplace)
+        """
+        # 讀取現有資料
+        existing = self.load_operator_index()
+        if existing is None:
+            existing = {}
+        
+        # 更新指定 index_type 的資料
+        existing[index_type] = packages
+        
         with open(self.index_file, 'w', encoding='utf-8') as f:
-            json.dump(packages, f, indent=2, ensure_ascii=False)
+            json.dump(existing, f, indent=2, ensure_ascii=False)
+    
+    def get_packages_by_index(self, index_type):
+        """取得指定 index_type 的 package 列表"""
+        index_data = self.load_operator_index()
+        if not index_data:
+            return []
+        return index_data.get(index_type, [])
+    
+    def get_all_packages(self):
+        """取得所有 index 的所有 package（附帶 index_type 標記）"""
+        index_data = self.load_operator_index()
+        if not index_data:
+            return []
+        
+        all_packages = []
+        for index_type, packages in index_data.items():
+            for pkg in packages:
+                pkg_with_type = dict(pkg)
+                pkg_with_type['index_type'] = index_type
+                all_packages.append(pkg_with_type)
+        return all_packages
     
     def get_catalogs(self):
-        """獲取 catalog 列表（從快取或預設值）"""
-        index_data = self.load_operator_index()
-        if index_data:
-            # 從 operator_index.json 推導 catalog
-            # 實際可從 tool_config.json 獲取版本
-            version = self._get_ocp_version()
-            return [f"registry.redhat.io/redhat/redhat-operator-index:v{version}"]
-        
-        # 嘗試舊的 operator_catalog.json
-        if os.path.exists(self.catalog_file):
-            with open(self.catalog_file, 'r') as f:
-                data = json.load(f)
-                return list(data.get('catalogs', {}).keys())
-        
+        """獲取 catalog 列表"""
         version = self._get_ocp_version()
-        return [f"registry.redhat.io/redhat/redhat-operator-index:v{version}"]
+        from src.registry_manager import RegistryManager
+        catalogs = []
+        for idx_type in self.ALL_INDEX_TYPES:
+            info = RegistryManager.INDEX_TYPES.get(idx_type)
+            if info:
+                catalogs.append(info['image_template'].format(version=version))
+        return catalogs
     
     def get_packages(self, catalog):
         """獲取 package 名稱列表（從 operator_index.json）"""
-        index_data = self.load_operator_index()
-        if index_data:
-            return [p['package_name'] for p in index_data]
-        
-        # 備用：從舊 catalog 獲取
-        if os.path.exists(self.catalog_file):
-            with open(self.catalog_file, 'r') as f:
-                data = json.load(f)
-                catalog_info = data.get('catalogs', {}).get(catalog, {})
-                return [p['name'] for p in catalog_info.get('packages', [])]
-        return []
+        return [p['package_name'] for p in self.get_all_packages()]
     
     def get_package_channels(self, catalog, package):
         """獲取 package 的 channel 資訊"""
-        index_data = self.load_operator_index()
-        if index_data:
-            for pkg in index_data:
-                if pkg['package_name'] == package:
-                    default_ch = pkg.get('default_channel', 'stable')
-                    return {
-                        'default_channel': default_ch,
-                        'channels': [{'name': default_ch}]
-                    }
+        pkg = self.get_package_info(package)
+        if pkg:
+            default_ch = pkg.get('default_channel', 'stable')
+            return {
+                'default_channel': default_ch,
+                'channels': [{'name': default_ch}]
+            }
         return {'default_channel': 'stable', 'channels': []}
     
     def get_package_info(self, package_name):
-        """獲取單個 package 的完整資訊"""
-        index_data = self.load_operator_index()
-        if index_data:
-            for pkg in index_data:
+        """獲取單個 package 的完整資訊（含 index_type）"""
+        return self.get_all_packages_with_index(package_name)
+    
+    def get_all_packages_with_index(self, package_name=None):
+        """
+        獲取 package 資訊（含 index_type）
+        
+        Args:
+            package_name: 若指定則只回傳該 package，否則回傳全部
+            
+        Returns:
+            單個 package dict（含 index_type）或全部列表
+        """
+        all_packages = self.get_all_packages()
+        if package_name:
+            for pkg in all_packages:
                 if pkg['package_name'] == package_name:
                     return pkg
-        return None    
+            return None
+        return all_packages
     
     def get_ocp_version(self):
         """獲取 OCP 版本"""
-        # 先從 operator_index.json
-        index_data = self.load_operator_index()
-        if index_data and 'ocp_version' in index_data:
-            return index_data['ocp_version']
-        
         return self._get_ocp_version()
     
     def _get_ocp_version(self):
