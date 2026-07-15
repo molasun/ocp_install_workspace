@@ -236,12 +236,41 @@ class YAMLGenerator:
         return images
 
     def _build_operator_blocks(self, operators):
-        """構建 operators 區塊"""
+        """構建 operators 區塊（按 catalog 分組）"""
         if not operators:
             return []
-        catalog = f"registry.redhat.io/redhat/redhat-operator-index:v{self.v_info.get('OCP_RELEASE', '4.20').rsplit('.', 1)[0]}"
-        packages = [{"name": op['name'], "channels": [{"name": op.get('channel', 'stable'), "minVersion": op.get('minVersion', ''), "maxVersion": op.get('maxVersion', '')}]} for op in operators]
-        return [{"catalog": catalog, "packages": packages}]
+        
+        from src.registry_manager import RegistryManager
+        
+        ocp = self.v_info.get('OCP_RELEASE', '4.20.8')
+        major_minor = ocp.rsplit('.', 1)[0]
+        
+        # 按 catalog (index_type) 分組
+        grouped = {}
+        for op in operators:
+            cat_key = op.get('catalog', 'redhat')
+            if cat_key not in grouped:
+                grouped[cat_key] = []
+            grouped[cat_key].append(op)
+        
+        blocks = []
+        for cat_key, ops in grouped.items():
+            idx_info = RegistryManager.INDEX_TYPES.get(cat_key, RegistryManager.INDEX_TYPES['redhat'])
+            catalog_image = idx_info['image_template'].format(version=major_minor)
+            packages = [
+                {
+                    "name": op['name'],
+                    "channels": [{
+                        "name": op.get('channel', 'stable'),
+                        "minVersion": op.get('minVersion', ''),
+                        "maxVersion": op.get('maxVersion', '')
+                    }]
+                }
+                for op in ops
+            ]
+            blocks.append({"catalog": catalog_image, "packages": packages})
+        
+        return blocks
     
     def generate_agent_config(self):
         """生成 AgentConfig YAML"""

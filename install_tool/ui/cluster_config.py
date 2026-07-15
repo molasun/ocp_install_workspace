@@ -2,6 +2,7 @@ import streamlit as st
 import os
 import re
 
+from i18n import t
 from src.config_manager import ConfigManager
 from src.yaml_generator import YAMLGenerator
 
@@ -11,8 +12,8 @@ os.makedirs(CONFIG_DIR, exist_ok=True)
 
 def show_cluster_config_page():
     """渲染集群配置頁面，包含身份、網路、節點及憑證設定"""
-    st.title("2. 🏗️ Cluster Configuration")
-    st.markdown("配置集群網絡、節點 IP 及認證信息，用於生成 `install-config.yaml` 和 `agent-config.yaml`。")
+    st.title(t('cluster.title'))
+    st.markdown(t('cluster.subtitle'))
     
     config_manager = ConfigManager('cluster_config.json')
     config = config_manager.get_config()
@@ -115,27 +116,27 @@ def _collect_all_node_names(config, exclude_prefix=None, exclude_index=None):
 
 def _render_cluster_identity(config):
     """渲染安裝模式、集群名稱與 Base Domain 的輸入區塊"""
-    st.subheader("Cluster Identity")
+    st.subheader(t('cluster.identity'))
     col1, col2, col3 = st.columns(3)
     with col1:
         config['install_env']['INSTALL_MODE'] = st.selectbox(
-            "Install Mode",
+            t('cluster.install_mode'),
             ["standard", "compact", "sno"],
             index=["standard", "compact", "sno"].index(config['install_env']['INSTALL_MODE']),
             key="install_mode_select"
         )
     with col2:
         config['install_env']['CLUSTER_DOMAIN'] = st.text_input(
-            "Cluster Name (metadata.name)",
+            t('cluster.cluster_name'),
             value=config['install_env']['CLUSTER_DOMAIN'],
-            help="例如：ocp4",
+            help=t('cluster.cluster_name_help'),
             key="cluster_domain_input"
         )
     with col3:
         config['install_env']['BASE_DOMAIN'] = st.text_input(
-            "Base Domain",
+            t('cluster.base_domain'),
             value=config['install_env']['BASE_DOMAIN'],
-            help="例如：demo.lab",
+            help=t('cluster.base_domain_help'),
             key="base_domain_input"
         )
 
@@ -152,22 +153,22 @@ def _render_ocp_version_info(config):
     ocp_version = match.group(1) if match else '4.20'
     config['version_info']['OCP_VERSION'] = ocp_version
     
-    st.info(f"📦 OCP Version: **{ocp_version}** (Release: {ocp_release})")
+    st.info(t('cluster.ocp_version', version=ocp_version, release=ocp_release))
 
     arch = config['version_info'].get('ARCHITECTURE', 'amd64')
     rhel = config['version_info'].get('RHEL_VERSION', 'rhel9')
-    st.caption(f"🔧 Architecture: `{arch}` | RHEL: `{rhel}`")
+    st.caption(t('cluster.arch_info', arch=arch, rhel=rhel))
 
     cluster_name = config['install_env']['CLUSTER_DOMAIN'].split('.')[0] \
         if '.' in config['install_env']['CLUSTER_DOMAIN'] else config['install_env']['CLUSTER_DOMAIN']
     if cluster_name and config['install_env']['BASE_DOMAIN']:
         registry_fqdn = f"bastion.{cluster_name}.{config['install_env']['BASE_DOMAIN']}"
-        st.info(f"📌 Registry URL will be: **{registry_fqdn}:8443**")
+        st.info(t('cluster.registry_url', fqdn=registry_fqdn))
 
 def _render_network_nodes(config_manager, config):
     """渲染 Master、Infra、Worker 三類節點的數量與網路配置區塊"""
     st.divider()
-    st.subheader("Network & Nodes")
+    st.subheader(t('cluster.network_nodes'))
     
     _render_node_section(config_manager, config, "Master", "master_count", 1, 3,
                          "MASTER", "BC:24:11:99:B8:1B", "ens18", "/dev/sda")
@@ -179,13 +180,13 @@ def _render_network_nodes(config_manager, config):
 def _render_node_section(config_manager, config, label, count_key, min_val, max_val,
                          prefix, default_mac, default_iface, default_device):
     """渲染單一節點類別的數量選擇器與動態輸入表單"""
-    st.markdown(f"#### {label} Nodes")
+    st.markdown(f"#### {t('cluster.nodes_label', label=label)}")
     cols = st.columns([3, 1])
     with cols[0]:
-        st.write(f"Current {label} Count: {st.session_state[count_key]}")
+        st.write(t('cluster.current_count', label=label, count=st.session_state[count_key]))
     with cols[1]:
         new_count = st.number_input(
-            f"{label} Count", min_value=min_val, max_value=max_val,
+            t('cluster.count_input', label=label), min_value=min_val, max_value=max_val,
             value=st.session_state[count_key], key=f"{count_key}_input"
         )
         if new_count != st.session_state[count_key]:
@@ -244,24 +245,24 @@ def _render_node_inputs(config, i, prefix, default_mac, default_iface, default_d
     
     c0, c1, c2, c3, c4 = st.columns([2, 3, 3, 2, 2])
     with c0:
-        name_val = st.text_input(f"{prefix} {i:02d} Name", value=st.session_state[f"name_{name_key}"], key=f"input_{name_key}")
+        name_val = st.text_input(t('cluster.node_name', prefix=prefix, index=i), value=st.session_state[f"name_{name_key}"], key=f"input_{name_key}")
     with c1:
-        ip_val = st.text_input(f"{prefix} {i:02d} IP", value=st.session_state[f"ip_{ip_key}"], key=f"input_{ip_key}")
+        ip_val = st.text_input(t('cluster.node_ip', prefix=prefix, index=i), value=st.session_state[f"ip_{ip_key}"], key=f"input_{ip_key}")
     with c2:
-        mac_val = st.text_input(f"{prefix} {i:02d} MAC", value=st.session_state[f"mac_{mac_key}"], key=f"input_{mac_key}")
+        mac_val = st.text_input(t('cluster.node_mac', prefix=prefix, index=i), value=st.session_state[f"mac_{mac_key}"], key=f"input_{mac_key}")
     with c3:
-        iface_val = st.text_input(f"{prefix} {i:02d} Interface", value=st.session_state[f"iface_{iface_key}"], key=f"input_{iface_key}")
+        iface_val = st.text_input(t('cluster.node_iface', prefix=prefix, index=i), value=st.session_state[f"iface_{iface_key}"], key=f"input_{iface_key}")
     with c4:
-        device_val = st.text_input(f"{prefix} {i:02d} Device", value=st.session_state[f"device_{device_key}"], key=f"input_{device_key}")
+        device_val = st.text_input(t('cluster.node_device', prefix=prefix, index=i), value=st.session_state[f"device_{device_key}"], key=f"input_{device_key}")
     
     if name_val and not _is_valid_hostname(name_val):
-        st.error("❌ Invalid hostname (lowercase alphanumeric and hyphens, max 63 chars)")
+        st.error(t('cluster.error_hostname'))
     elif name_val and name_val in _collect_all_node_names(config, exclude_prefix=prefix, exclude_index=i):
-        st.error("❌ Duplicate hostname")
+        st.error(t('cluster.error_dup_hostname'))
     if ip_val and not _is_valid_ipv4(ip_val):
-        st.error("❌ Invalid IP")
+        st.error(t('cluster.error_ip'))
     if mac_val and not _is_valid_mac(mac_val):
-        st.error("❌ Invalid MAC")
+        st.error(t('cluster.error_mac'))
     
     st.session_state[f"name_{name_key}"] = name_val
     st.session_state[f"ip_{ip_key}"] = ip_val
@@ -282,80 +283,80 @@ def _render_cluster_form(config_manager, config):
         _render_network_config(config)
         _render_credentials(config)
         
-        if st.form_submit_button("💾 Save & Generate install-config.yaml"):
+        if st.form_submit_button(t('cluster.save_generate')):
             _handle_form_submit(config_manager, config)
 
 def _render_other_ips(config):
     """渲染 Bastion、Gateway、Bootstrap 的名稱與 IP 輸入欄位"""
-    st.subheader("Other Nodes")
+    st.subheader(t('cluster.other_nodes'))
     
     # Bastion Name + IP
-    st.markdown("**Bastion**")
+    st.markdown(t('cluster.bastion'))
     col_bast_name, col_bast_ip = st.columns([1, 2])
     with col_bast_name:
         bastion_name = st.text_input(
-            "Bastion Name", value=config['install_env'].get('BASTION_NAME', 'bastion'), key="bastion_name_input")
+            t('cluster.bastion_name'), value=config['install_env'].get('BASTION_NAME', 'bastion'), key="bastion_name_input")
         if bastion_name and not _is_valid_hostname(bastion_name):
-            st.error("❌ Invalid hostname")
+            st.error(t('cluster.error_hostname'))
         elif bastion_name and bastion_name in _collect_all_node_names(config, exclude_prefix='BASTION'):
-            st.error("❌ Duplicate hostname")
+            st.error(t('cluster.error_dup_hostname'))
         config['install_env']['BASTION_NAME'] = bastion_name
     with col_bast_ip:
-        bastion_ip = st.text_input("Bastion IP", value=config['install_env'].get('BASTION_IP', ''), key="bastion_ip_input")
+        bastion_ip = st.text_input(t('cluster.bastion_ip'), value=config['install_env'].get('BASTION_IP', ''), key="bastion_ip_input")
         if bastion_ip and not _is_valid_ipv4(bastion_ip):
-            st.error("❌ Invalid IP")
+            st.error(t('cluster.error_ip'))
         config['install_env']['BASTION_IP'] = bastion_ip
     
     # Bootstrap Name + IP
-    st.markdown("**Bootstrap**")
+    st.markdown(t('cluster.bootstrap'))
     col_boot_name, col_boot_ip = st.columns([1, 2])
     with col_boot_name:
         bootstrap_name = st.text_input(
-            "Bootstrap Name", value=config['install_env'].get('BOOTSTRAP_NAME', 'bootstrap'), key="bootstrap_name_input")
+            t('cluster.bootstrap_name'), value=config['install_env'].get('BOOTSTRAP_NAME', 'bootstrap'), key="bootstrap_name_input")
         if bootstrap_name and not _is_valid_hostname(bootstrap_name):
-            st.error("❌ Invalid hostname")
+            st.error(t('cluster.error_hostname'))
         elif bootstrap_name and bootstrap_name in _collect_all_node_names(config, exclude_prefix='BOOTSTRAP'):
-            st.error("❌ Duplicate hostname")
+            st.error(t('cluster.error_dup_hostname'))
         config['install_env']['BOOTSTRAP_NAME'] = bootstrap_name
     with col_boot_ip:
-        bootstrap_ip = st.text_input("Bootstrap IP (optional)", value=config['install_env'].get('BOOTSTRAP_IP', ''), key="bootstrap_ip_input")
+        bootstrap_ip = st.text_input(t('cluster.bootstrap_ip'), value=config['install_env'].get('BOOTSTRAP_IP', ''), key="bootstrap_ip_input")
         if bootstrap_ip and not _is_valid_ipv4(bootstrap_ip):
-            st.error("❌ Invalid IP")
+            st.error(t('cluster.error_ip'))
         config['install_env']['BOOTSTRAP_IP'] = bootstrap_ip
     
     # Gateway IP
-    st.markdown("**Gateway**")
-    gateway_ip = st.text_input("Gateway IP", value=config['install_env'].get('GATEWAY_IP', ''), key="gateway_ip_input")
+    st.markdown(t('cluster.gateway'))
+    gateway_ip = st.text_input(t('cluster.gateway_ip'), value=config['install_env'].get('GATEWAY_IP', ''), key="gateway_ip_input")
     if gateway_ip and not _is_valid_ipv4(gateway_ip):
-        st.error("❌ Invalid IP")
+        st.error(t('cluster.error_ip'))
     config['install_env']['GATEWAY_IP'] = gateway_ip
 
 def _render_network_config(config):
     """渲染 Machine/Cluster/Service Network 及 Network Type 的配置區塊"""
-    st.subheader("Network Configuration")
+    st.subheader(t('cluster.network_config'))
     col1, col2 = st.columns(2)
     with col1:
         config['install_env']['MACHINE_NETWORK_CIDR'] = st.text_input(
-            "Machine Network CIDR (optional)", value=config['install_env']['MACHINE_NETWORK_CIDR'],
-            help="Leave empty to auto-generate from Bastion IP", key="machine_cidr_input")
+            t('cluster.machine_cidr'), value=config['install_env']['MACHINE_NETWORK_CIDR'],
+            help=t('cluster.machine_cidr_help'), key="machine_cidr_input")
         config['install_env']['CLUSTER_NETWORK_CIDR'] = st.text_input(
-            "Cluster Network CIDR", value=config['install_env']['CLUSTER_NETWORK_CIDR'], key="cluster_cidr_input")
+            t('cluster.cluster_cidr'), value=config['install_env']['CLUSTER_NETWORK_CIDR'], key="cluster_cidr_input")
     with col2:
         config['install_env']['CLUSTER_NETWORK_HOST_PREFIX'] = st.number_input(
-            "Host Prefix", min_value=1, max_value=32,
+            t('cluster.host_prefix'), min_value=1, max_value=32,
             value=int(config['install_env'].get('CLUSTER_NETWORK_HOST_PREFIX', 23)), key="host_prefix_input")
         config['install_env']['SERVICE_NETWORK_CIDR'] = st.text_input(
-            "Service Network CIDR", value=config['install_env']['SERVICE_NETWORK_CIDR'], key="service_cidr_input")
+            t('cluster.service_cidr'), value=config['install_env']['SERVICE_NETWORK_CIDR'], key="service_cidr_input")
     
     config['install_env']['NETWORK_TYPE'] = st.selectbox(
-        "Network Type", ["OVNKubernetes", "OpenShiftSDN"],
+        t('cluster.network_type'), ["OVNKubernetes", "OpenShiftSDN"],
         index=0 if config['install_env']['NETWORK_TYPE'] == 'OVNKubernetes' else 1, key="network_type_input")
 
 def _render_credentials(config):
     """渲染 Registry Password、SSH Key 及 Trust Bundle 的輸入區塊"""
-    st.subheader("Credentials & Keys")
+    st.subheader(t('cluster.credentials'))
     config['install_env']['REGISTRY_PASSWORD'] = st.text_input(
-        "Registry Password", value=config['install_env']['REGISTRY_PASSWORD'], type="password", key="registry_pwd_input")
+        t('cluster.registry_password'), value=config['install_env']['REGISTRY_PASSWORD'], type="password", key="registry_pwd_input")
     
     # 每次都從 install_source/.ssh/id_rsa.pub 讀取公鑰並覆蓋 UI
     pubkey_path = os.path.join(CURRENT_DIR, 'install_source', '.ssh', 'id_rsa.pub')
@@ -374,8 +375,8 @@ def _render_credentials(config):
     
     col1, col2 = st.columns(2)
     with col1:
-        ssh_input = st.text_area("SSH Public Key",
-                                  height=100, help="自動讀取 install_source/.ssh/id_rsa.pub", key="ssh_key_input")
+        ssh_input = st.text_area(t('cluster.ssh_key'),
+                                  height=100, help=t('cluster.ssh_key_help'), key="ssh_key_input")
         if "ssh-" in ssh_input or "\n" in ssh_input:
             config['install_env']['SSH_KEY'] = ssh_input
         elif os.path.exists(ssh_input):
@@ -385,8 +386,8 @@ def _render_credentials(config):
             config['install_env']['SSH_KEY'] = ssh_input
     
     with col2:
-        trust_input = st.text_area("Additional Trust Bundle (CA Cert)", value=config['install_env']['ADDITIONAL_TRUST_BUNDLE'],
-                                    height=150, help="貼上 CA Certificate 內容", key="trust_bundle_input")
+        trust_input = st.text_area(t('cluster.trust_bundle'), value=config['install_env']['ADDITIONAL_TRUST_BUNDLE'],
+                                    height=150, help=t('cluster.trust_bundle_help'), key="trust_bundle_input")
         if "BEGIN CERTIFICATE" in trust_input or os.path.exists(trust_input):
             if os.path.exists(trust_input):
                 with open(trust_input, 'r') as f:
@@ -400,22 +401,22 @@ def _handle_form_submit(config_manager, config):
     """驗證必填欄位後同步節點資料並生成 YAML 配置檔"""
     env = config['install_env']
     if not env['CLUSTER_DOMAIN'] or not env['BASE_DOMAIN']:
-        st.error("Cluster Name 和 Base Domain 不能為空")
+        st.error(t('cluster.error_empty_name'))
     elif not env.get('SSH_KEY'):
-        st.error("SSH Key 不能為空")
+        st.error(t('cluster.error_empty_ssh'))
     elif not env.get('REGISTRY_PASSWORD'):
-        st.error("Registry Password 不能為空")
+        st.error(t('cluster.error_empty_password'))
     else:
         # 驗證所有節點名稱
         all_names = _collect_all_node_names(config)
         if len(all_names) != len(set(all_names)):
-            st.error("❌ 有重複的節點名稱，請檢查")
+            st.error(t('cluster.error_dup_names'))
             return
         
         # 驗證名稱格式
         invalid_names = [n for n in all_names if not _is_valid_hostname(n)]
         if invalid_names:
-            st.error(f"❌ 節點名稱格式不正確: {', '.join(invalid_names)}")
+            st.error(t('cluster.error_invalid_names', names=', '.join(invalid_names)))
             return
         
         tool_config = ConfigManager('tool_config.json').get_config()
@@ -459,18 +460,18 @@ def _generate_yamls(config):
     with open(agent_path, 'w') as f:
         f.write(agent_yaml)
     
-    st.success("✅ Configuration saved & `install-config.yaml` generated!")
-    st.success("✅ `agent-config.yaml` generated!")
+    st.success(t('cluster.config_saved'))
+    st.success(t('cluster.agent_config_saved'))
     
-    with st.expander("Preview install-config.yaml"):
+    with st.expander(t('cluster.preview_install')):
         st.code(yaml_content, language="yaml")
-    with st.expander("Preview agent-config.yaml"):
+    with st.expander(t('cluster.preview_agent')):
         st.code(agent_yaml, language="yaml")
 
 def _render_next_button():
     """當集群配置完成時渲染前往 Operators 頁面的按鈕"""
     if st.session_state.cluster_configured:
         st.divider()
-        if st.button("➡️ Next: Operators & CSI", use_container_width=True):
+        if st.button(t('cluster.next_operators'), use_container_width=True):
             st.session_state.current_view = 'operators'
             st.rerun()

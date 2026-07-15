@@ -440,21 +440,51 @@ class SetupWizard:
     def run_get_operator_catalog_via_grpc(
         self, 
         config: dict, 
-        status_callback: Optional[Callable[[str], None]] = None
+        status_callback: Optional[Callable[[str], None]] = None,
+        selected_indexes: Optional[List[str]] = None
     ) -> bool:
-        """使用 gRPC 獲取 Operator Catalog"""
+        """
+        使用 gRPC 獲取 Operator Catalog（支援多個 index）
+        
+        Args:
+            config: 配置字典
+            status_callback: 狀態回調函數
+            selected_indexes: 要查詢的 index 類型列表，如 ['redhat', 'certified']
+                              若為 None 則預設查詢 redhat
+        """
+        if selected_indexes is None:
+            selected_indexes = ['redhat']
+        
         # 步驟1: 檢查 grpcurl
         grpcurl_cmd = self._ensure_grpcurl_available(status_callback)
         if not grpcurl_cmd:
             return False
         
-        # 步驟2: 確保容器運行
-        container_name, port = self._ensure_container_running(config, status_callback)
-        if not container_name:
-            return False
+        # 逐個 index 查詢
+        all_success = True
+        for index_type in selected_indexes:
+            from src.registry_manager import RegistryManager
+            index_label = RegistryManager.INDEX_TYPES.get(index_type, {}).get('label', index_type)
+            self._notify(status_callback, f"\n{'='*50}")
+            self._notify(status_callback, f"📂 開始查詢 {index_label} ({index_type})")
+            self._notify(status_callback, f"{'='*50}")
+            
+            # 步驟2: 確保該 index 的容器運行
+            container_name, port = self._ensure_container_running(config, status_callback, index_type)
+            if not container_name:
+                self._notify(status_callback, f"❌ {index_label} 容器啟動失敗，跳過")
+                all_success = False
+                continue
+            
+            # 步驟3: 查詢並儲存
+            success = self._fetch_and_save_catalog(grpcurl_cmd, port, container_name, status_callback, index_type)
+            if not success:
+                all_success = False
+            
+            # 步驟4: 保持容器運行（Step 3 operator 查詢版本時需要復用）
+            self._notify(status_callback, f"💡 {index_label} 容器保持運行，供步驟3 查詢版本時復用")
         
-        # 步驟3: 查詢並儲存
-        return self._fetch_and_save_catalog(grpcurl_cmd, port, container_name, status_callback)
+        return all_success
 
     def _ensure_grpcurl_available(self, status_callback: Optional[Callable] = None) -> Optional[str]:
         """確保 grpcurl 可用"""
@@ -473,19 +503,22 @@ class SetupWizard:
     def _ensure_container_running(
         self, 
         config: dict, 
-        status_callback: Optional[Callable] = None
+        status_callback: Optional[Callable] = None,
+        index_type: str = 'redhat'
     ) -> tuple:
-        """確保容器正在運行"""
-        self._notify(status_callback, "📦 檢查容器狀態...")
+        """確保指定 index 類型的容器正在運行"""
+        self._notify(status_callback, f"📦 檢查容器狀態 ({index_type})...")
         
-        container_name = self._get_container_name(config)
+        container_name = self._get_container_name(config, index_type)
         
         if self._check_container_running(container_name):
             self._notify(status_callback, f"✅ 容器已在運行: {container_name}")
-            return container_name, RegistryManager.DEFAULT_PORT
+            return container_name, self.registry.get_port(index_type)
         
-        self._notify(status_callback, "📦 容器未運行，正在啟動...")
-        success, name, port = self.registry.start_operator_registry(config, status_callback)
+        self._notify(status_callback, f"📦 容器未運行，正在啟動 ({index_type})...")
+        success, name, port = self.registry.start_operator_registry(
+            config, status_callback=status_callback, index_type=index_type
+        )
         
         if not success:
             self._notify(status_callback, "❌ 啟動 Registry 容器失敗")
@@ -498,12 +531,16 @@ class SetupWizard:
         grpcurl_cmd: str,
         port: int,
         container_name: str,
-        status_callback: Optional[Callable] = None
+        status_callback: Optional[Callable] = None,
+        index_type: str = 'redhat'
     ) -> bool:
-        """查詢並儲存 Operator Catalog"""
+        """查詢並儲存 Operator Catalog（按 index_type 分區）"""
+        from src.registry_manager import RegistryManager
+        index_label = RegistryManager.INDEX_TYPES.get(index_type, {}).get('label', index_type)
+        
         try:
             # 查詢 packages
-            self._notify(status_callback, "📡 查詢所有 Packages...")
+            self._notify(status_callback, f"📡 查詢 {index_label} 所有 Packages...")
             output = self.op_mgr.list_packages_grpc(grpcurl_cmd, port)
             
             if not output:
@@ -523,12 +560,11 @@ class SetupWizard:
                 grpcurl_cmd, port, package_names, status_callback
             )
             
-            # 儲存
-            self._notify(status_callback, f"💾 儲存 operator_index.json ({len(packages)} packages, {error_count} 錯誤)...")
-            self.op_mgr.save_operator_index(packages)
+            # 儲存（按 index_type 分區）
+            self._notify(status_callback, f"💾 儲存 operator_index.json [{index_type}] ({len(packages)} packages, {error_count} 錯誤)...")
+            self.op_mgr.save_operator_index(packages, index_type)
             
-            self._notify(status_callback, f"✅ operator_index.json 已創建 ({len(packages)} packages)")
-            self._notify(status_callback, "💡 容器保持運行，可手動關閉")
+            self._notify(status_callback, f"✅ operator_index.json [{index_type}] 已創建 ({len(packages)} packages)")
             
             return True
             
@@ -606,13 +642,13 @@ class SetupWizard:
             log_error(f"解壓失敗：{e}")
             return None
         
-    def _get_container_name(self, config: dict) -> str:
-        """從配置取得容器名稱"""
+    def _get_container_name(self, config: dict, index_type: str = 'redhat') -> str:
+        """從配置取得容器名稱（含 index_type）"""
         v_info = config.get('version_info', {})
         ocp_release = v_info.get('OCP_RELEASE', RegistryManager.DEFAULT_OCP_RELEASE)
         match = re.match(r'(\d+\.\d+)', ocp_release)
         ocp_version = match.group(1) if match else RegistryManager.DEFAULT_OCP_VERSION
-        return RegistryManager.CONTAINER_NAME_TEMPLATE.format(version=ocp_version)
+        return self.registry.get_container_name(index_type, ocp_version)
     
     def _check_container_running(self, container_name: str) -> bool:
         """檢查容器是否運行"""

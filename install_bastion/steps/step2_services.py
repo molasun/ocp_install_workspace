@@ -1,42 +1,43 @@
 #!/usr/bin/env python3
 import streamlit as st
 import time
+from i18n import t
 from managers.setup_manager import SetupManager
 
 
 def render_step2_services():
     """步驟2: 基礎服務安裝"""
-    st.header("🔧 步驟2: 基礎服務安裝")
-    st.markdown("確認以下服務配置內容，確認無誤後點擊安裝。")
+    st.header(t('step2.header'))
+    st.markdown(t('step2.subtitle'))
     
     config = st.session_state.get('config_params', {})
     manager = SetupManager(config)
     
     # === DNS 配置預覽 ===
-    st.subheader("📡 DNS 配置 (dnsmasq)")
-    with st.expander("查看 DNS 配置內容", expanded=False):
+    st.subheader(t('step2.dns_title'))
+    with st.expander(t('step2.dns_preview'), expanded=False):
         dns_config = manager.dns_manager.generate_config()
         st.code(dns_config, language="text")
-        st.caption(f"配置檔位置: /etc/dnsmasq.d/dns.conf")
+        st.caption(t('step2.config_path', path='/etc/dnsmasq.d/dns.conf'))
     
     # === HAProxy 配置預覽 ===
-    st.subheader("⚖️ HAProxy 配置")
-    with st.expander("查看 HAProxy 配置內容", expanded=False):
+    st.subheader(t('step2.haproxy_title'))
+    with st.expander(t('step2.haproxy_preview'), expanded=False):
         haproxy_config = manager.haproxy_manager.generate_config()
         st.code(haproxy_config, language="text")
-        st.caption(f"配置檔位置: /etc/haproxy/haproxy.cfg")
+        st.caption(t('step2.config_path', path='/etc/haproxy/haproxy.cfg'))
     
     # === NTP 配置預覽 ===
-    st.subheader("🕐 NTP 配置 (chrony)")
-    with st.expander("查看 NTP 配置內容", expanded=False):
+    st.subheader(t('step2.ntp_title'))
+    with st.expander(t('step2.ntp_preview'), expanded=False):
         ntp_config = manager.ntp_manager.generate_config()
         st.code(ntp_config, language="text")
-        st.caption(f"配置檔位置: /etc/chrony.conf")
+        st.caption(t('step2.config_path', path='/etc/chrony.conf'))
     
     st.markdown("---")
     
     # === 安裝選項確認 ===
-    st.subheader("📋 本步驟將執行的操作")
+    st.subheader(t('step2.tasks_title'))
     
     install_options = st.session_state.get('install_options', {})
     
@@ -44,37 +45,37 @@ def render_step2_services():
     tasks_config = {
         'firewalld_disable': {
             'icon': '🚫',
-            'name': '停用防火牆 (firewalld)',
+            'name': t('step2.task_firewalld'),
             'method': 'disable_firewalld',
             'manager': 'others_manager'
         },
         'selinux_disable': {
             'icon': '🛡️',
-            'name': '停用 SELinux (設定為 Permissive)',
+            'name': t('step2.task_selinux'),
             'method': 'disable_selinux',
             'manager': 'others_manager'
         },
         'dns_configure': {
             'icon': '📡',
-            'name': '安裝並設定 DNS 伺服器 (dnsmasq)',
+            'name': t('step2.task_dns'),
             'method': 'setup_dns',
             'manager': 'dns_manager'
         },
         'dns_check': {
             'icon': '🔍',
-            'name': '檢查 DNS 記錄',
+            'name': t('step2.task_dns_check'),
             'method': 'check_dns',
             'manager': 'dns_manager'
         },
         'haproxy_configure': {
             'icon': '⚖️',
-            'name': '安裝並設定 HAProxy',
+            'name': t('step2.task_haproxy'),
             'method': 'setup_haproxy',
             'manager': 'haproxy_manager'
         },
         'ntp_server_configure': {
             'icon': '🕐',
-            'name': '安裝並設定 NTP 伺服器 (chrony)',
+            'name': t('step2.task_ntp'),
             'method': 'setup_ntp',
             'manager': 'ntp_manager'
         }
@@ -87,10 +88,10 @@ def render_step2_services():
             active_tasks.append(task_info)
     
     if not active_tasks:
-        st.warning("沒有選擇要安裝的服務，請返回步驟1選擇安裝選項。")
+        st.warning(t('step2.no_tasks'))
         col_back, _ = st.columns([1, 3])
         with col_back:
-            if st.button("⬅️ 返回步驟1", type="primary"):
+            if st.button(t('step2.back_step1'), type="primary"):
                 st.session_state.current_step = 1
                 st.rerun()
         return    
@@ -111,14 +112,14 @@ def render_step2_services():
     
     with col_btn1:
         if not st.session_state.step2_executed:
-            if st.button("🚀 開始安裝基礎服務", type="primary"):
+            if st.button(t('step2.start_install'), type="primary"):
                 _execute_step2_tasks(manager, active_tasks)
                 st.rerun()
     
     # === 顯示執行結果 ===
     if st.session_state.step2_executed:
         st.markdown("---")
-        st.subheader("📊 執行結果")
+        st.subheader(t('step2.results'))
         
         results = st.session_state.step2_results
         success_count = sum(1 for r in results.values() if r.get('success', False))
@@ -127,7 +128,7 @@ def render_step2_services():
         # 顯示進度摘要
         col_prog1, col_prog2 = st.columns([1, 3])
         with col_prog1:
-            st.metric("完成進度", f"{success_count}/{total_count}")
+            st.metric(t('step2.progress'), f"{success_count}/{total_count}")
         
         all_success = success_count == total_count
         
@@ -146,20 +147,20 @@ def render_step2_services():
                 st.error(f"{task_name}: {result.get('message', '')}")
         
         if all_success:
-            st.success("🎉 所有基礎服務安裝成功！")
+            st.success(t('step2.all_success'))
             
             # 顯示服務狀態摘要
             _display_service_status(manager, install_options)
         else:
-            st.warning("⚠️ 部分服務安裝失敗，請檢查上方錯誤訊息。")
-            st.info("💡 您可以重試失敗的步驟，或跳過後繼續下一步。")
+            st.warning(t('step2.some_failed'))
+            st.info(t('step2.retry_hint'))
     
     # === 導航按鈕 ===
     st.markdown("---")
     col_nav1, col_nav2, col_nav3 = st.columns([1, 1, 2])
     
     with col_nav1:
-        if st.button("⬅️ 返回步驟1", use_container_width=True):
+        if st.button(t('step2.back_step1'), use_container_width=True):
             st.session_state.current_step = 1
             st.rerun()
     
@@ -170,10 +171,10 @@ def render_step2_services():
             all_success = all(r.get('success', False) for r in results.values())
             
             if all_success:
-                btn_label = "➡️ 進入步驟3"
+                btn_label = t('step2.next_step3')
                 btn_type = "primary"
             else:
-                btn_label = "➡️ 跳過失敗，進入步驟3"
+                btn_label = t('step2.skip_step3')
                 btn_type = "secondary"
             
             if st.button(btn_label, type=btn_type, use_container_width=True):
@@ -188,7 +189,7 @@ def render_step2_services():
         
         if has_failures:
             with col_nav3:
-                if st.button("🔄 重新執行所有步驟", use_container_width=True):
+                if st.button(t('step2.retry_all'), use_container_width=True):
                     st.session_state.step2_executed = False
                     st.session_state.step2_results = {}
                     st.rerun()
@@ -207,10 +208,10 @@ def _execute_step2_tasks(manager: SetupManager, active_tasks: list):
         task_name = f"{task['icon']} {task['name']}"
         method = task['method']
         
-        status_text.text(f"正在執行: {task_name}...")
+        status_text.text(t('step2.executing', task=task_name))
         
         with st.expander(f"{task_name}", expanded=True):
-            st.info(f"⏳ 執行中...")
+            st.info(t('step2.executing_status'))
             
             # 執行步驟
             success, message = manager.execute_step(method)
@@ -223,7 +224,7 @@ def _execute_step2_tasks(manager: SetupManager, active_tasks: list):
                 # 提供重試和跳過選項
                 col_r, col_s = st.columns(2)
                 with col_r:
-                    if st.button("🔄 重試此步驟", key=f"retry_{method}"):
+                    if st.button(t('step2.retry_step'), key=f"retry_{method}"):
                         # 重新執行此步驟
                         retry_success, retry_message = manager.execute_step(method)
                         if retry_success:
@@ -231,15 +232,15 @@ def _execute_step2_tasks(manager: SetupManager, active_tasks: list):
                             success = True
                             message = retry_message
                         else:
-                            st.error(f"❌ 重試仍失敗: {retry_message}")
+                            st.error(t('step2.retry_failed', msg=retry_message))
                         st.rerun()
                 with col_s:
-                    if st.button("⏭️ 跳過此步驟", key=f"skip_{method}"):
-                        st.warning(f"⏭️ 已跳過: {task_name}")
+                    if st.button(t('step2.skip_step'), key=f"skip_{method}"):
+                        st.warning(t('step2.skipped', task=task_name))
                         # 記錄為跳過（非成功也非失敗）
                         st.session_state.step2_results[method] = {
                             'success': False,
-                            'message': f'已跳過: {message}',
+                            'message': t('step2.skipped', task=message),
                             'skipped': True
                         }
                         continue
@@ -254,12 +255,12 @@ def _execute_step2_tasks(manager: SetupManager, active_tasks: list):
         progress_bar.progress((i + 1) / total)
         time.sleep(0.3)
     
-    status_text.text("✅ 基礎服務安裝程序完成！")
+    status_text.text(t('step2.complete'))
 
 def _display_service_status(manager: SetupManager, install_options: dict):
     """顯示服務狀態摘要"""
     st.markdown("---")
-    st.subheader("🔍 服務狀態檢查")
+    st.subheader(t('step2.service_status'))
     
     # 檢查各服務狀態
     services_to_check = []
@@ -283,7 +284,7 @@ def _display_service_status(manager: SetupManager, install_options: dict):
                 if service == "firewalld":
                     is_active = manager.dns_manager._check_service_status(service)
                     if is_active:
-                        st.metric(name, "Running", delta="⚠️ 應為停用")
+                        st.metric(name, "Running", delta=t('step2.should_be_stopped'))
                     else:
                         st.metric(name, "Stopped", delta="✅")
                 else:
@@ -298,4 +299,4 @@ def _display_service_status(manager: SetupManager, install_options: dict):
         success, stdout, _ = manager.dns_manager._run_command("getenforce")
         if success:
             selinux_status = stdout.strip()
-            st.info(f"SELinux 當前狀態: **{selinux_status}**")
+            st.info(t('step2.selinux_status', status=selinux_status))

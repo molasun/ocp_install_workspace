@@ -1,34 +1,35 @@
 import streamlit as st
 import time
+from i18n import t
 
 
 def render_step1_config():
     """步驟1: 確認環境配置"""
-    st.header("📝 步驟1: 確認環境配置與安裝選項")
-    st.markdown("以下配置來自 `config/cluster_config.json`，僅供確認，不可修改。")
+    st.header(t('step1.header'))
+    st.markdown(t('step1.subtitle'))
     
     config = st.session_state.get('config_params', {})
     
     # === 基本環境資訊（唯讀） ===
-    st.subheader("🏗️ 基本環境資訊")
+    st.subheader(t('step1.env_info'))
     
     col1, col2 = st.columns(2)
     
     with col1:
         st.text_input(
-            "叢集名稱 (clusterName)", 
+            t('step1.cluster_name'), 
             value=config.get('clusterName', 'N/A'), 
             disabled=True, 
             key="cfg_cluster_name"
         )
         st.text_input(
-            "基礎網域 (baseDomain)", 
+            t('step1.base_domain'), 
             value=config.get('baseDomain', 'N/A'), 
             disabled=True, 
             key="cfg_base_domain"
         )
         st.text_input(
-            "網路介面 (interface)", 
+            t('step1.interface'), 
             value=config.get('interface', 'N/A'), 
             disabled=True, 
             key="cfg_interface"
@@ -36,19 +37,19 @@ def render_step1_config():
         
     with col2:
         st.text_input(
-            "堡壘主機 IP", 
+            t('step1.bastion_ip'), 
             value=config.get('bastion', {}).get('ip', 'N/A'), 
             disabled=True, 
             key="cfg_bastion_ip"
         )
         st.text_input(
-            "部署模式", 
+            t('step1.mode'), 
             value=config.get('mode', 'N/A'), 
             disabled=True, 
             key="cfg_mode"
         )
         st.text_input(
-            "上游 DNS", 
+            t('step1.dns_upstream'), 
             value=config.get('dns_upstream', 'N/A'), 
             disabled=True, 
             key="cfg_dns_upstream"
@@ -57,7 +58,7 @@ def render_step1_config():
     # === 版本資訊（唯讀） ===
     version_info = config.get('versionInfo', {})
     if version_info:
-        st.subheader("📦 版本資訊")
+        st.subheader(t('step1.version_info'))
         col_v1, col_v2 = st.columns(2)
         with col_v1:
             st.text_input(
@@ -75,7 +76,7 @@ def render_step1_config():
             )
     
     # === 節點配置（唯讀） ===
-    st.subheader("🖥️ 節點配置")
+    st.subheader(t('step1.node_config'))
     
     # 輔助函數：渲染節點表格
     def render_node_group(title: str, nodes: list, prefix: str):
@@ -86,65 +87,65 @@ def render_step1_config():
             cols = st.columns(4)
             with cols[0]:
                 st.text_input(
-                    "名稱", 
+                    t('step1.node_name'), 
                     value=node.get('name', 'N/A'), 
                     disabled=True, 
                     key=f"cfg_{prefix}_{idx}_name"
                 )
             with cols[1]:
                 st.text_input(
-                    "IP", 
+                    t('step1.node_ip'), 
                     value=node.get('ip', 'N/A'), 
                     disabled=True, 
                     key=f"cfg_{prefix}_{idx}_ip"
                 )
             with cols[2]:
                 st.text_input(
-                    "MAC", 
+                    t('step1.node_mac'), 
                     value=node.get('mac', 'N/A'), 
                     disabled=True, 
                     key=f"cfg_{prefix}_{idx}_mac"
                 )
             with cols[3]:
                 st.text_input(
-                    "裝置", 
+                    t('step1.node_device'), 
                     value=node.get('device', 'N/A'), 
                     disabled=True, 
                     key=f"cfg_{prefix}_{idx}_device"
                 )
     
     # Master 節點
-    render_node_group("Master 節點", config.get('master', []), "master")
+    render_node_group(t('step1.master_nodes'), config.get('master', []), "master")
     
     # Bootstrap 節點
     bootstrap = config.get('bootstrap', {})
-    st.markdown("**Bootstrap 節點**")
+    st.markdown(f"**{t('step1.bootstrap_node')}**")
     col_b1, col_b2 = st.columns(2)
     with col_b1:
         st.text_input(
-            "Bootstrap 名稱", 
+            t('step1.bootstrap_name'), 
             value=bootstrap.get('name', 'N/A'), 
             disabled=True, 
             key="cfg_bootstrap_name"
         )
     with col_b2:
         st.text_input(
-            "Bootstrap IP", 
+            t('step1.bootstrap_ip'), 
             value=bootstrap.get('ip', 'N/A'), 
             disabled=True, 
             key="cfg_bootstrap_ip"
         )
     
     # Worker 節點
-    render_node_group("Worker 節點", config.get('worker', []), "worker")
+    render_node_group(t('step1.worker_nodes'), config.get('worker', []), "worker")
     
     # Infra 節點
-    render_node_group("Infra 節點", config.get('infra', []), "infra")
+    render_node_group(t('step1.infra_nodes'), config.get('infra', []), "infra")
     
     # === 網路配置 ===
     net_config = config.get('networkConfig', {})
     if net_config:
-        st.subheader("🌐 網路配置")
+        st.subheader(t('step1.network_config'))
         col_n1, col_n2 = st.columns(2)
         with col_n1:
             if 'machineNetworkCidr' in net_config:
@@ -194,7 +195,7 @@ def render_step1_config():
     st.markdown("---")
     
     # === 安裝選項（可修改的勾選） ===
-    st.subheader("⚙️ 預計安裝的工具")
+    st.subheader(t('step1.install_tools'))
     
     install_options = st.session_state.get('install_options', {})
     
@@ -202,41 +203,41 @@ def render_step1_config():
     
     with col_opt1:
         firewalld_disable = st.checkbox(
-            "停用防火牆", 
+            t('step1.opt_firewalld'), 
             value=install_options.get('firewalld_disable', True),
             key="opt_firewalld"
         )
         selinux_disable = st.checkbox(
-            "停用 SELinux", 
+            t('step1.opt_selinux'), 
             value=install_options.get('selinux_disable', True),
             key="opt_selinux"
         )
         dns_configure = st.checkbox(
-            "設定 DNS", 
+            t('step1.opt_dns'), 
             value=install_options.get('dns_configure', True),
             key="opt_dns"
         )
         
     with col_opt2:
         dns_check = st.checkbox(
-            "檢查 DNS", 
+            t('step1.opt_dns_check'), 
             value=install_options.get('dns_check', True),
             key="opt_dns_check"
         )
         haproxy_configure = st.checkbox(
-            "設定 HAProxy", 
+            t('step1.opt_haproxy'), 
             value=install_options.get('haproxy_configure', True),
             key="opt_haproxy"
         )
         ntp_server_configure = st.checkbox(
-            "設定 NTP 伺服器", 
+            t('step1.opt_ntp'), 
             value=install_options.get('ntp_server_configure', True),
             key="opt_ntp"
         )
         
     with col_opt3:
         registry_configure = st.checkbox(
-            "設定鏡像倉庫", 
+            t('step1.opt_registry'), 
             value=install_options.get('registry_configure', True),
             key="opt_registry"
         )
@@ -247,7 +248,7 @@ def render_step1_config():
     col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 2])
     
     with col_btn1:
-        if st.button("✅ 確認配置，進入下一步", type="primary", key="btn_confirm_step1"):
+        if st.button(t('step1.confirm'), type="primary", key="btn_confirm_step1"):
             # 保存安裝選項
             st.session_state.install_options = {
                 'firewalld_disable': firewalld_disable,
@@ -263,12 +264,12 @@ def render_step1_config():
             st.session_state.config_params.update(st.session_state.install_options)            
             st.session_state.step1_complete = True
             st.session_state.current_step = 2
-            st.success("配置已確認！進入步驟2...")
+            st.success(t('step1.confirm_success'))
             time.sleep(1)
             st.rerun()
     
     with col_btn2:
-        if st.button("🔄 重設選項", key="btn_reset_step1"):
+        if st.button(t('step1.reset'), key="btn_reset_step1"):
             st.session_state.install_options = {
                 'firewalld_disable': True,
                 'selinux_disable': True,
