@@ -1,49 +1,168 @@
 import streamlit as st
 import os
 import subprocess
+import json
+from datetime import datetime
 from i18n import t
 from managers.base_manager import BaseManager
 from managers.setup_manager import SetupManager
 from managers.agent_create_manager import AgentCreateManager
 
 
-def _check_registry_catalog(config_params: dict) -> tuple:
+def _check_registry_catalog(config_params: dict) -> dict:
     """
-    檢查 Registry catalog 是否已有鏡像
+    三層級檢查 Registry 鏡像推送狀態
+
+    Level 1: Catalog — repo 是否存在（最快）
+    Level 2: Tags — tag 數量 >= 3（有實際鏡像）
+    Level 3: Release — release image manifest 是否存在（最可信）
 
     Returns:
-        (success: bool, message: str)
+        dict: verified / passed / failed / tag_count / reponame / release_tag / checked_at
     """
     bastion_ip = config_params.get('bastion', {}).get('ip', '')
     registry_password = config_params.get('registryPassword', '')
     reponame = st.session_state.get('file_paths', {}).get('reponame', 'ocp420')
 
-    if not bastion_ip or not registry_password:
-        return False, t('step4.missing_bastion')
+    # 推導 release tag：ocp_release-arch (e.g. 4.20.8-x86_64)
+    version_info = config_params.get('versionInfo', {})
+    ocp_release = version_info.get('ocpRelease', '4.20.8')
+    arch = version_info.get('architecture', 'amd64')
+    arch_map = {'amd64': 'x86_64', 'arm64': 'aarch64'}
+    release_tag = f"{ocp_release}-{arch_map.get(arch, arch)}"
 
+    result = {
+        'verified': False,
+        'passed': [],
+        'failed': [],
+        'tag_count': 0,
+        'reponame': reponame,
+        'release_tag': release_tag,
+        'checked_at': datetime.now().strftime('%H:%M:%S'),
+    }
+
+    if not bastion_ip or not registry_password:
+        result['failed'].append('connection')
+        return result
+
+    auth = f"init:{registry_password}"
+    base_url = f"https://{bastion_ip}:8443/v2"
+
+    # Level 1: Catalog 檢查
     try:
-        result = subprocess.run(
-            f"curl -sk -u init:{registry_password} https://{bastion_ip}:8443/v2/_catalog",
+        r = subprocess.run(
+            f"curl -sk -u {auth} {base_url}/_catalog",
             shell=True, capture_output=True, text=True, timeout=10
         )
-
-        if result.returncode == 0:
-            if reponame in result.stdout:
-                return True, t('step4.sync_complete', repo=reponame)
-            else:
-                return False, t('step4.sync_not_found', repo=reponame)
+        if r.returncode == 0 and reponame in r.stdout:
+            result['passed'].append('catalog')
         else:
-            return False, t('step4.registry_unreachable', error=result.stderr[:200])
+            result['failed'].append('catalog')
+            return result  # Level 1 未通過，後面不查
+    except Exception:
+        result['failed'].append('catalog')
+        return result
 
-    except subprocess.TimeoutExpired:
-        return False, t('step4.check_timeout')
-    except Exception as e:
-        return False, t('step4.check_failed', error=str(e))
+    # Level 2: Tags 數量檢查
+    try:
+        r = subprocess.run(
+            f"curl -sk -u {auth} {base_url}/{reponame}/tags/list",
+            shell=True, capture_output=True, text=True, timeout=10
+        )
+        if r.returncode == 0:
+            data = json.loads(r.stdout)
+            tags = data.get('tags', [])
+            result['tag_count'] = len(tags)
+            if len(tags) >= 3:
+                result['passed'].append('tags')
+            else:
+                result['failed'].append('tags')
+        else:
+            result['failed'].append('tags')
+    except Exception:
+        result['failed'].append('tags')
+
+    # Level 3: Release Image 確認
+    try:
+        r = subprocess.run(
+            f"curl -sk -o /dev/null -w '%{{http_code}}' -u {auth} -I {base_url}/{reponame}/manifests/{release_tag}",
+            shell=True, capture_output=True, text=True, timeout=10
+        )
+        if r.returncode == 0 and '200' in r.stdout:
+            result['passed'].append('release')
+        else:
+            result['failed'].append('release')
+    except Exception:
+        result['failed'].append('release')
+
+    # Level 1 + Level 2 通過即視為驗證通過
+    result['verified'] = 'catalog' in result['passed'] and 'tags' in result['passed']
+
+    return result
+
+
+def _render_sync_check_section(config_params: dict):
+    """渲染同步狀態檢查區塊（三層級檢查 + 結果快取）"""
+    st.subheader(t('step4.check_status'))
+    st.markdown(t('step4.check_desc'))
+
+    if st.button(t('step4.check_button'), use_container_width=True):
+        with st.spinner(t('step4.checking')):
+            sync_result = _check_registry_catalog(config_params)
+            st.session_state['mirror_sync_result'] = sync_result
+
+    # 顯示檢查結果（從 session_state 讀取，避免頁面刷新重複 curl）
+    sync_result = st.session_state.get('mirror_sync_result')
+    if sync_result:
+        st.caption(f"🕐 {sync_result.get('checked_at', '')}")
+
+        levels = [
+            ('catalog', t('step4.check_level_catalog')),
+            ('tags', t('step4.check_level_tags', count=sync_result.get('tag_count', 0))),
+            ('release', t('step4.check_level_release', tag=sync_result.get('release_tag', ''))),
+        ]
+
+        for level_key, level_label in levels:
+            if level_key in sync_result['passed']:
+                st.markdown(f"✅ {level_label}")
+            else:
+                st.markdown(f"❌ {level_label}")
+
+        if sync_result['verified']:
+            st.success(t('step4.sync_verified'))
+        else:
+            passed_str = ', '.join(sync_result.get('passed', []))
+            failed_str = ', '.join(sync_result.get('failed', []))
+            st.warning(t('step4.sync_partial', passed=passed_str, failed=failed_str))
+
+    st.markdown("---")
+
 
 def _render_agent_image_section(config_params: dict):
-    """渲染 Agent Image 生成區塊"""
+    """渲染 Agent Image 生成區塊（根據同步狀態條件啟用）"""
     st.subheader(t('step4.agent.title'))
     st.markdown(t('step4.agent.desc'))
+
+    sync_result = st.session_state.get('mirror_sync_result')
+
+    # 狀態 1：尚未檢查
+    if not sync_result:
+        st.info(t('step4.sync_not_checked'))
+        st.button(t('step4.agent.generate'), type="primary", use_container_width=True,
+                  key="btn_agent_create", disabled=True)
+        st.markdown("---")
+        return
+
+    # 狀態 2：檢查未通過
+    if not sync_result['verified']:
+        st.warning(t('step4.agent.gated'))
+        st.button(t('step4.agent.generate'), type="primary", use_container_width=True,
+                  key="btn_agent_create", disabled=True)
+        st.markdown("---")
+        return
+
+    # 狀態 3：同步驗證通過
+    st.success(t('step4.sync_verified'))
 
     manager = AgentCreateManager(config_params)
 
@@ -52,6 +171,7 @@ def _render_agent_image_section(config_params: dict):
     if not prereq_ok:
         st.warning(t('step4.agent.prereq_failed', msg=prereq_msg))
         st.info(t('step4.agent.prereq_hint'))
+        st.markdown("---")
         return
 
     st.success(t('step4.agent.ready'))
@@ -84,6 +204,7 @@ def _render_agent_image_section(config_params: dict):
 
     st.markdown("---")
 
+
 def render_step4_mirror():
     """步驟4: 鏡像同步"""
     st.header(t('step4.header'))
@@ -91,8 +212,7 @@ def render_step4_mirror():
 
     config_params = st.session_state.get('config_params', {})
 
-    _render_agent_image_section(config_params)
-
+    # === 1. Registry 狀態檢查 ===
     install_source_dir = BaseManager._get_install_source_dir()
     mirror_dir = os.path.join(install_source_dir, "mirror")
 
@@ -121,6 +241,7 @@ def render_step4_mirror():
 
     st.markdown("---")
 
+    # === 2. 檔案檢查 ===
     st.subheader(t('step4.file_check'))
 
     bastion_ip = config_params.get('bastion', {}).get('ip', '')
@@ -155,6 +276,7 @@ def render_step4_mirror():
 
     st.markdown("---")
 
+    # === 3. 同步指令 ===
     st.subheader(t('step4.sync_title'))
     st.markdown(t('step4.sync_desc'))
 
@@ -177,20 +299,13 @@ def render_step4_mirror():
 
     st.markdown("---")
 
-    st.subheader(t('step4.check_status'))
-    st.markdown(t('step4.check_desc'))
+    # === 4. 同步狀態檢查（三層級，結果存入 session_state） ===
+    _render_sync_check_section(config_params)
 
-    if st.button(t('step4.check_button'), use_container_width=True):
-        with st.spinner(t('step4.checking')):
-            success, msg = _check_registry_catalog(config_params)
-            if success:
-                st.success(msg)
-                st.balloons()
-            else:
-                st.warning(msg)
+    # === 5. Agent Image 生成（移到底部，根據同步狀態條件啟用） ===
+    _render_agent_image_section(config_params)
 
-    st.markdown("---")
-
+    # === 6. 導航按鈕 ===
     col_nav1, col_nav2 = st.columns([1, 3])
 
     with col_nav1:

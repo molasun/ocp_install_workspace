@@ -116,11 +116,14 @@ listen ingress-router-80
     def install(self) -> Tuple[bool, str]:
         """安裝並設定 HAProxy"""
         self._log("開始設定 HAProxy...")
-        
-        # 安裝 haproxy
-        success, _, err = self._run_command("yum install -y haproxy")
-        if not success:
-            return False, f"HAProxy 安裝失敗: {err}"
+
+        # 檢查 haproxy 服務是否已在運行，已運行則跳過安裝
+        if self._check_service_status("haproxy"):
+            self._log("haproxy 服務已運行，跳過安裝")
+        else:
+            success, _, err = self._run_command("yum install -y haproxy")
+            if not success:
+                return False, f"HAProxy 安裝失敗: {err}"
         
         # 備份原始配置
         haproxy_cfg = '/etc/haproxy/haproxy.cfg'

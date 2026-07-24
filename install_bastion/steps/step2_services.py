@@ -78,13 +78,22 @@ def render_step2_services():
             'name': t('step2.task_ntp'),
             'method': 'setup_ntp',
             'manager': 'ntp_manager'
+        },
+        'nmstate_install': {
+            'icon': '🌐',
+            'name': t('step2.task_nmstate'),
+            'method': 'install_nmstate',
+            'manager': 'others_manager',
+            'always_run': True
         }
     }
 
     # 收集需要執行的任務
     active_tasks = []
     for key, task_info in tasks_config.items():
-        if install_options.get(key, False):
+        if task_info.get('always_run', False):
+            active_tasks.append(task_info)
+        elif install_options.get(key, False):
             active_tasks.append(task_info)
     
     if not active_tasks:

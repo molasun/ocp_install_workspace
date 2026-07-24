@@ -83,6 +83,7 @@ class SetupManager:
             # Others Manager
             'disable_firewalld': self.others_manager.disable_firewalld,
             'disable_selinux': self.others_manager.disable_selinux,
+            'install_nmstate': self.others_manager.install_nmstate,
             'check_system_requirements': self.others_manager.check_system_requirements,
             
             # DNS Manager

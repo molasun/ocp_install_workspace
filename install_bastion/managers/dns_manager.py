@@ -72,11 +72,14 @@ address=/api-int.{cluster_name}.{base_domain}/{bastion_ip}
     def install(self) -> Tuple[bool, str]:
         """安裝並設定 DNS 伺服器"""
         self._log("開始設定 DNS 伺服器 (dnsmasq)...")
-        
-        # 1. 安裝 dnsmasq 和 bind-utils（用於 nslookup/dig）
-        success, _, err = self._run_command("yum install -y dnsmasq bind-utils")
-        if not success:
-            return False, f"dnsmasq 安裝失敗: {err}"
+
+        # 1. 檢查 dnsmasq 服務是否已在運行，已運行則跳過安裝
+        if self._check_service_status("dnsmasq"):
+            self._log("dnsmasq 服務已運行，跳過安裝")
+        else:
+            success, _, err = self._run_command("yum install -y dnsmasq bind-utils")
+            if not success:
+                return False, f"dnsmasq 安裝失敗: {err}"
         
         # 2. 取得並驗證網路介面
         interface = self._get_valid_interface()
