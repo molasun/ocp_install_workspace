@@ -72,6 +72,22 @@ class OthersManager(BaseManager):
         
         return False, f"SELinux 設定失敗，當前狀態: {stdout.strip()}"
     
+    def install_nmstate(self) -> Tuple[bool, str]:
+        """安裝 nmstate 網路管理工具"""
+        self._log("開始安裝 nmstate...")
+
+        # 檢查是否已安裝
+        success, _, _ = self._run_command("rpm -q nmstate")
+        if success:
+            self._log("nmstate 已安裝，跳過")
+            return True, "nmstate 已安裝"
+
+        success, _, err = self._run_command("yum install -y nmstate")
+        if not success:
+            return False, f"nmstate 安裝失敗: {err}"
+
+        return True, "nmstate 已成功安裝"
+    
     def check_system_requirements(self) -> Tuple[bool, str]:
         """檢查系統基本需求"""
         self._log("檢查系統基本需求...")

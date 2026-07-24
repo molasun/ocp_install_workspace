@@ -67,7 +67,7 @@ class YAMLGenerator:
         """驗證所有 IP 欄位"""
         ip_fields = []
         for prefix, max_i in [("MASTER", 3), ("INFRA", 3), ("WORKER", 10)]:
-            for i in range(1, max_i):
+            for i in range(1, max_i + 1):
                 key = f"{prefix}{i:02d}_IP"
                 if self._get_env(key):
                     ip_fields.append((key, self.env[key]))
@@ -287,7 +287,7 @@ class YAMLGenerator:
         
         hosts = []
         for prefix, role, max_i in [("MASTER", "master", 3), ("INFRA", "worker", 3), ("WORKER", "worker", 10)]:
-            for i in range(1, max_i):
+            for i in range(1, max_i + 1):
                 ip = self._get_env(f"{prefix}{i:02d}_IP")
                 if ip:
                     default_hostname = f"{prefix.lower()}-{i}"

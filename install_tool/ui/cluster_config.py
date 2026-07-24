@@ -60,6 +60,85 @@ def _init_state(config):
         if key not in config['install_env']:
             config['install_env'][key] = val
 
+    # 首次載入：確保節點數量與 INSTALL_MODE 一致（處理外部修改 config 的情況）
+    if 'prev_install_mode' not in st.session_state:
+        mode = install_env.get('INSTALL_MODE', 'standard')
+        st.session_state.prev_install_mode = mode
+        rules = _MODE_RULES.get(mode, _MODE_RULES['standard'])
+        for prefix, count_key, target in [
+            ("MASTER", "master_count", rules['master']),
+            ("INFRA", "infra_count", rules['infra']),
+            ("WORKER", "worker_count", rules['worker']),
+        ]:
+            current = st.session_state.get(count_key, 0)
+
+            # STANDARD 模式下的 worker: target 是最小值（1），不是精確值
+            # 若 config 已有 3 個 worker，不應裁減到 1
+            if mode == 'standard' and prefix == 'WORKER':
+                if current < target:
+                    st.session_state[count_key] = target
+            else:
+                # target 是精確值
+                if current > target:
+                    # 超出模式允許的數量，清除多餘節點
+                    for i in range(target + 1, current + 1):
+                        for suffix in ["IP", "NAME", "MAC", "INTERFACE", "DEVICE"]:
+                            key = f"{prefix}{i:02d}_{suffix}"
+                            install_env.pop(key, None)
+                    st.session_state[count_key] = target
+                elif current < target:
+                    # 不足模式要求的最低數量
+                    st.session_state[count_key] = target
+
+# 各模式對應的節點數量規則
+_MODE_RULES = {
+    'sno':      {'master': 1, 'infra': 0, 'worker': 0},
+    'compact':  {'master': 3, 'infra': 0, 'worker': 0},
+    'standard': {'master': 3, 'infra': 0, 'worker': 1},
+}
+
+def _apply_mode_rules(config, new_mode):
+    """INSTALL_MODE 變更時自動調整節點數量並清理不適用的節點資料
+
+    注意：不調用 st.rerun()，由呼叫方所在的 Streamlit 自然 rerun 機制處理。
+    """
+    rules = _MODE_RULES.get(new_mode, _MODE_RULES['standard'])
+    env = config['install_env']
+    env['INSTALL_MODE'] = new_mode
+
+    for prefix, count_key, target_count in [
+        ("MASTER", "master_count", rules['master']),
+        ("INFRA", "infra_count", rules['infra']),
+        ("WORKER", "worker_count", rules['worker']),
+    ]:
+        old_count = st.session_state.get(count_key, 0)
+        st.session_state[count_key] = target_count
+        # 刪除舊 widget key，讓 widget 改用 value= 參數讀取新的 count 值
+        # （避免 Streamlit 報 "widget was created with a default value but also
+        #   had its value set via the Session State API" 的 warn）
+        st.session_state.pop(f"{count_key}_input", None)
+
+        # 清理超出目標數量的節點 session_state 與 config 資料
+        for i in range(target_count + 1, old_count + 1):
+            for suffix in ["IP", "NAME", "MAC", "INTERFACE", "DEVICE"]:
+                key = f"{prefix}{i:02d}_{suffix}"
+                state_prefix = 'name' if suffix == 'NAME' else 'ip' if suffix == 'IP' else 'mac' if suffix == 'MAC' else 'iface' if suffix == 'INTERFACE' else 'device'
+                state_key = f"{state_prefix}_{key}"
+                st.session_state.pop(state_key, None)
+                env.pop(key, None)
+
+        # 初始化新增節點的預設值
+        for i in range(old_count + 1, target_count + 1):
+            for suffix in ["IP", "NAME", "MAC", "INTERFACE", "DEVICE"]:
+                key = f"{prefix}{i:02d}_{suffix}"
+                state_prefix = 'name' if suffix == 'NAME' else 'ip' if suffix == 'IP' else 'mac' if suffix == 'MAC' else 'iface' if suffix == 'INTERFACE' else 'device'
+                state_key = f"{state_prefix}_{key}"
+                if state_key not in st.session_state:
+                    if suffix == "NAME":
+                        st.session_state[state_key] = f"{prefix.lower()}-{i-1}"
+                    else:
+                        st.session_state[state_key] = ""
+
 def _is_valid_ipv4(ip):
     """驗證 IPv4 格式"""
     if not ip:
@@ -119,12 +198,18 @@ def _render_cluster_identity(config):
     st.subheader(t('cluster.identity'))
     col1, col2, col3 = st.columns(3)
     with col1:
-        config['install_env']['INSTALL_MODE'] = st.selectbox(
+        new_mode = st.selectbox(
             t('cluster.install_mode'),
             ["standard", "compact", "sno"],
             index=["standard", "compact", "sno"].index(config['install_env']['INSTALL_MODE']),
             key="install_mode_select"
         )
+        # 檢測模式變更 → 調整節點數量（不調用 st.rerun，讓腳本自然繼續）
+        prev_mode = st.session_state.get('prev_install_mode', new_mode)
+        if new_mode != prev_mode:
+            _apply_mode_rules(config, new_mode)
+            st.session_state.prev_install_mode = new_mode
+        config['install_env']['INSTALL_MODE'] = new_mode
     with col2:
         config['install_env']['CLUSTER_DOMAIN'] = st.text_input(
             t('cluster.cluster_name'),
@@ -166,19 +251,32 @@ def _render_ocp_version_info(config):
         st.info(t('cluster.registry_url', fqdn=registry_fqdn))
 
 def _render_network_nodes(config_manager, config):
-    """渲染 Master、Infra、Worker 三類節點的數量與網路配置區塊"""
+    """渲染 Master、Infra、Worker 三類節點的數量與網路配置區塊
+
+    根據 INSTALL_MODE 控制顯示哪些節點區塊：
+    - SNO: 僅 Master（鎖定 1）
+    - COMPACT: 僅 Master（鎖定 3）
+    - STANDARD: Master（鎖定 3）+ Infra（0~3）+ Worker（1~不限）
+    """
     st.divider()
     st.subheader(t('cluster.network_nodes'))
-    
+
+    mode = config['install_env'].get('INSTALL_MODE', 'standard')
+
+    # Master 始終顯示，所有模式都鎖定數量
     _render_node_section(config_manager, config, "Master", "master_count", 1, 3,
-                         "MASTER", "BC:24:11:99:B8:1B", "ens18", "/dev/sda")
-    _render_node_section(config_manager, config, "Infra", "infra_count", 0, 3,
-                         "INFRA", "BC:24:11:99:B8:1B", "ens18", "/dev/sda")
-    _render_node_section(config_manager, config, "Worker", "worker_count", 0, 9,
-                         "WORKER", "BC:24:11:99:B8:1B", "ens18", "/dev/sda")
+                         "MASTER", "BC:24:11:99:B8:1B", "ens18", "/dev/sda",
+                         disabled=True)
+
+    # Infra 和 Worker 僅在 STANDARD 模式下顯示
+    if mode == 'standard':
+        _render_node_section(config_manager, config, "Infra", "infra_count", 0, 3,
+                             "INFRA", "BC:24:11:99:B8:1B", "ens18", "/dev/sda")
+        _render_node_section(config_manager, config, "Worker", "worker_count", 1, 99,
+                             "WORKER", "BC:24:11:99:B8:1B", "ens18", "/dev/sda")
 
 def _render_node_section(config_manager, config, label, count_key, min_val, max_val,
-                         prefix, default_mac, default_iface, default_device):
+                         prefix, default_mac, default_iface, default_device, disabled=False):
     """渲染單一節點類別的數量選擇器與動態輸入表單"""
     st.markdown(f"#### {t('cluster.nodes_label', label=label)}")
     cols = st.columns([3, 1])
@@ -187,9 +285,10 @@ def _render_node_section(config_manager, config, label, count_key, min_val, max_
     with cols[1]:
         new_count = st.number_input(
             t('cluster.count_input', label=label), min_value=min_val, max_value=max_val,
-            value=st.session_state[count_key], key=f"{count_key}_input"
+            value=st.session_state[count_key], key=f"{count_key}_input",
+            disabled=disabled
         )
-        if new_count != st.session_state[count_key]:
+        if not disabled and new_count != st.session_state[count_key]:
             _update_node_count(config_manager, config, count_key, new_count, prefix)
     
     # 動態生成輸入框
@@ -407,6 +506,25 @@ def _handle_form_submit(config_manager, config):
     elif not env.get('REGISTRY_PASSWORD'):
         st.error(t('cluster.error_empty_password'))
     else:
+        # 驗證模式相關的節點數量
+        mode = env.get('INSTALL_MODE', 'standard')
+        master_count = st.session_state.master_count
+        worker_count = st.session_state.worker_count
+
+        if mode == 'sno' and master_count != 1:
+            st.error(t('cluster.error_sno_master'))
+            return
+        elif mode == 'compact' and master_count != 3:
+            st.error(t('cluster.error_compact_master'))
+            return
+        elif mode == 'standard':
+            if master_count != 3:
+                st.error(t('cluster.error_standard_master'))
+                return
+            if worker_count < 1:
+                st.error(t('cluster.error_standard_worker'))
+                return
+
         # 驗證所有節點名稱
         all_names = _collect_all_node_names(config)
         if len(all_names) != len(set(all_names)):
