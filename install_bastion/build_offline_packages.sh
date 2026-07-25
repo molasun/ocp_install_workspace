@@ -67,11 +67,16 @@ echo "      Resolved ${DEP_COUNT} packages"
 echo ""
 
 # === Step 2: Download wheels for Linux x86_64 ===
+#   uv does not have a "pip download" equivalent.
+#   Use pip download with the frozen list from uv (exact versions
+#   already resolved — no dependency skipping issue).
 echo "[2/3] Downloading wheels..."
+echo "      (using pip download, uv has no equivalent)"
 
-uv pip download \
-    --python-platform x86_64-unknown-linux-gnu \
-    --only-binary :all: \
+pip download \
+    --platform manylinux2014_x86_64 \
+    --python-version 311 \
+    --only-binary=:all: \
     -r "${PACKAGES_DIR}/requirements-frozen.txt" \
     -d "${PACKAGES_DIR}"
 
