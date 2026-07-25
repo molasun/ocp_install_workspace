@@ -135,13 +135,29 @@ class MirrorRegistryManager(BaseManager):
 
         self._log("解壓檔案確認完成")
 
+        # 3.5 確保 root 免密碼 SSH 到 localhost（mirror-registry 的 Ansible playbook 需要）
+        self._log("設定 root SSH 免密碼...")
+        self._run_command(
+            "sudo mkdir -p /root/.ssh && "
+            "sudo chmod 700 /root/.ssh && "
+            "[ -f /root/.ssh/id_rsa ] || sudo ssh-keygen -t rsa -f /root/.ssh/id_rsa -N '' -q && "
+            "sudo cat /root/.ssh/id_rsa.pub >> /root/.ssh/authorized_keys && "
+            "sudo sort -u /root/.ssh/authorized_keys -o /root/.ssh/authorized_keys && "
+            "sudo chmod 600 /root/.ssh/authorized_keys && "
+            "sudo ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@localhost echo ok"
+        )
+
         # 4. 在根目錄下執行 mirror-registry install
+        #    用 script -qc 提供偽 TTY — Streamlit headless 模式下 podman 的
+        #    --tty --interactive 參數會因無 TTY 而失敗。
         install_cmd = (
-            f"cd {home_dir} && ./mirror-registry install "
+            f"cd {home_dir} && script -qc "
+            f"'./mirror-registry install "
             f"--quayHostname {bastion_fqdn}:8443 "
             f"--quayRoot {quay_root} "
             f"--quayStorage {quay_storage} "
-            f"--initPassword {registry_password}"
+            f"--initPassword {registry_password}'"
+            f" /dev/null"
         )
 
         self._log(f"執行安裝...")
