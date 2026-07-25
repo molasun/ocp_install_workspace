@@ -99,7 +99,8 @@ sudo pkill -f "streamlit run" 2>/dev/null || true
 sleep 1
 
 # Start with sudo (needed for firewall/selinux/systemctl)
-sudo "${SCRIPT_DIR}/.venv/bin/streamlit" run \
+# Pass SUDO_USER explicitly — _get_real_home() depends on it to find ~/install_source
+sudo HOME="${HOME}" SUDO_USER="$(whoami)" "${SCRIPT_DIR}/.venv/bin/streamlit" run \
     "${SCRIPT_DIR}/install_app.py" \
     --server.port 8501 \
     --server.headless true \

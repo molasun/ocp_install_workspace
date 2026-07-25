@@ -235,12 +235,11 @@ def render_step3_cli_packages():
         if st.session_state.step3_executed:
             results = st.session_state.step3_results
             all_success = all(r.get('success', False) for r in results.values())
-            btn_label = t('step3.next_step4') if all_success else t('step3.skip_step4')
-            btn_type = "primary" if all_success else "secondary"
-            if st.button(btn_label, type=btn_type, use_container_width=True):
-                st.session_state.step3_complete = True
-                st.session_state.current_step = 4
-                st.rerun()
+            if all_success:
+                if st.button(t('step3.next_step4'), type="primary", use_container_width=True):
+                    st.session_state.step3_complete = True
+                    st.session_state.current_step = 4
+                    st.rerun()
     
     if st.session_state.step3_executed:
         results = st.session_state.step3_results
