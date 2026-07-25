@@ -46,39 +46,35 @@ class MirrorRegistryManager(BaseManager):
     def install(self) -> Tuple[bool, str]:
         """安裝 Mirror Registry"""
 
-        # 1. 檢查是否已運行
+        # 1. 檢查是否已正常運行
         installed, msg = self.check_installed()
         if installed:
             self._log(f"Mirror Registry 已運行: {msg}")
 
-            # 驗證連線
             connected, connect_msg = self.verify_connection()
-            if not connected:
-                self._log(f"連線驗證失敗，重新安裝...")
-                return self._fresh_install()
+            if connected:
+                self._log("Mirror Registry 已運行且連線正常，跳過安裝")
+                return True, "Mirror Registry 已安裝並運行"
 
-            self._log("Mirror Registry 已運行且連線正常，跳過安裝")
-            return True, "Mirror Registry 已安裝並運行"
+            # 容器在運行但連不上（如 quay-app crash）→ 清理後重裝
+            self._log(f"連線驗證失敗: {connect_msg}，清理後重新安裝...")
 
-        # 2. 取得配置
+        # 2. 清理舊安裝（任何情況下，只要存在舊狀態就清理，確保乾淨環境）
         quay_root = self.config.get('quayRoot', '/opt/quay')
         quay_storage = self.config.get('quayStorage', '/opt/quay-storage')
-        registry_password = self.config.get('registryPassword', 'password')
+        if self._was_installed() or installed:
+            self._log("偵測到舊安裝，清理後重新安裝...")
+            self._cleanup_installation(quay_root, quay_storage)
+        else:
+            self._log("全新安裝")
+
+        # 3. 確保 /etc/hosts 有 Bastion FQDN 記錄
         bastion_ip = self.config.get('bastion', {}).get('ip', '')
         bastion_name = self.config.get('bastion', {}).get('name', 'bastion')
         cluster_name = self.config.get('clusterName', 'ocp4')
         base_domain = self.config.get('baseDomain', 'example.com')
         bastion_fqdn = f"{bastion_name}.{cluster_name}.{base_domain}"
-
-        # 3. 確保 /etc/hosts 有 Bastion FQDN 記錄
         self._ensure_hosts_entry(bastion_ip, bastion_fqdn)
-
-        # 4. Quay 未運行 — 僅在曾安裝過時清理
-        if self._was_installed():
-            self._log("Quay 未運行，清理舊安裝...")
-            self._cleanup_installation(quay_root, quay_storage)
-        else:
-            self._log("全新安裝，跳過清理")
 
         return self._fresh_install()
 
@@ -185,7 +181,6 @@ class MirrorRegistryManager(BaseManager):
 
         mirror-registry 的容器/pod/volume 都屬於 root 用戶，
         所有 podman 命令必須帶 sudo 才能操作這些資源。
-        不使用 systemctl — mirror-registry 透過 podman 管理一切。
         """
         self._log("開始清理舊的 Mirror Registry 安裝...")
 
@@ -193,21 +188,19 @@ class MirrorRegistryManager(BaseManager):
 
         # 1. 先移除 quay-pod（會同時移除 pod 內所有容器）
         self._run_command("sudo podman pod rm -f quay-pod 2>/dev/null")
-        self._log("已移除 quay-pod")
 
         # 2. 清理殘留的 quay 容器（不在 pod 中的情況）
         self._run_command(
             "sudo podman ps -a --filter 'name=quay' --format '{{.Names}}' 2>/dev/null | "
             "xargs -r sudo podman rm -f 2>/dev/null"
         )
+        self._log("已移除 quay-pod 及所有 quay 容器")
 
-        # 3. 移除 volumes（關鍵：Redis 密碼存在 volume 裡，不清理會導致新安裝密碼不一致）
-        self._run_command(
-            "sudo podman volume ls -q 2>/dev/null | "
-            "grep -iE 'quay|sqlite|redis' | "
-            "xargs -r sudo podman volume rm -f 2>/dev/null"
-        )
-        self._log("已移除 quay 相關 volumes")
+        # 3. 清理所有無主 volume（pod/容器移除後，它們掛載的 volume 都變成 unused）
+        #    不用 grep 匹配名稱 — mirror-registry 的 volume 名稱不固定，可能對不上
+        #    prune -f 只刪除未被任何容器使用的 volume，不影響其他 podman 應用
+        self._run_command("sudo podman volume prune -f 2>/dev/null")
+        self._log("已清理所有無主 podman volumes")
 
         # 4. 嘗試 mirror-registry uninstall（清理遺留檔案）
         uninstall_cmd = (
@@ -216,13 +209,12 @@ class MirrorRegistryManager(BaseManager):
         )
         _, _, _ = self._run_command(uninstall_cmd, timeout=120)
 
-        # 5. 清除 quay 目錄
-        for dir_path in [quay_root, quay_storage]:
-            self._run_command(f"sudo rm -rf {dir_path} 2>/dev/null")
-            self._log(f"已移除目錄: {dir_path}")
-
-        # 6. 清除 quay 狀態目錄（~/.quay 存放 init 狀態等）
-        self._run_command("sudo rm -rf ~/.quay /root/.quay 2>/dev/null")
+        # 5. 清除 quay 目錄與狀態目錄
+        self._run_command(
+            f"sudo rm -rf {quay_root} {quay_storage} "
+            f"~/.quay /root/.quay 2>/dev/null"
+        )
+        self._log(f"已移除 {quay_root}, {quay_storage}, ~/.quay")
 
         self._log("清理完成")
 
