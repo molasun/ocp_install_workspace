@@ -50,11 +50,14 @@ trap "rm -rf ${TMP_VENV}" EXIT
 uv venv "${TMP_VENV}" --seed
 uv pip install \
     --reinstall \
+    --refresh \
     --no-deps \
     -r "${SCRIPT_DIR}/requirements.txt" \
     --python "${TMP_VENV}/bin/python3"
 
 uv pip install \
+    --reinstall \
+    --refresh \
     -r "${SCRIPT_DIR}/requirements.txt" \
     --python "${TMP_VENV}/bin/python3"
 
