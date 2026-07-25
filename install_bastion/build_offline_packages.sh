@@ -1,14 +1,19 @@
 #!/bin/bash
 #==============================================================================
-# 下載 streamlit 及其所有遞迴依賴的 Linux wheel，供離線環境安裝
+# 使用 uv 解析依賴並下載離線 wheel，供 RHEL 9 離線環境安裝
 #
-# 使用方式（需在 Linux 或 WSL 執行）：
+# 前置：
+#   - 已安裝 uv（開發環境使用 uv 管理套件）
+#   - install_bastion/requirements.txt 已定義依賴
+#
+# 使用方式：
 #   cd install_bastion
 #   chmod +x build_offline_packages.sh
 #   ./build_offline_packages.sh
 #
 # 輸出：
-#   install_bastion/packages/*.whl
+#   install_bastion/packages/requirements-frozen.txt  （完整的鎖定依賴清單）
+#   install_bastion/packages/*.whl                    （Linux x86_64 wheel）
 #==============================================================================
 
 set -euo pipefail
@@ -17,58 +22,70 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PACKAGES_DIR="${SCRIPT_DIR}/packages"
 
 echo "========================================"
-echo "Download offline packages"
+echo "Build offline packages (uv)"
 echo "========================================"
-echo "Target platform: manylinux2014_x86_64 (RHEL 9)"
-echo "Target Python:   3.11 (cp311)"
-echo "Output: ${PACKAGES_DIR}"
+echo "Target:  RHEL 9 (x86_64-unknown-linux-gnu)"
+echo "Python:  3.11"
+echo "Output:  ${PACKAGES_DIR}"
 echo ""
 
-# Clean old packages
+# Verify uv is available
+if ! command -v uv &> /dev/null; then
+    echo "ERROR: uv is not installed."
+    echo "       Install: curl -LsSf https://astral.sh/uv/install.sh | sh"
+    exit 1
+fi
+
+UV_VERSION=$(uv --version)
+echo "uv:      ${UV_VERSION}"
+echo ""
+
+# Clean
 rm -rf "${PACKAGES_DIR}"
 mkdir -p "${PACKAGES_DIR}"
 
-# Step 1: Resolve ALL transitive dependencies in a temp venv
-#   pip download --platform does not reliably resolve transitive deps
-#   (e.g. numpy is missed for streamlit). Run a native install first to
-#   get the complete dependency list, then download those exact packages.
-echo "[1/3] Resolving full dependency tree..."
+# === Step 1: Resolve full dependency tree with uv ===
+#
+#   uv pip compile reads requirements.txt, resolves ALL transitive
+#   deps, and outputs a fully pinned requirements file.
+#
+#   --python-platform ensures platform-specific packages (like numpy)
+#   are resolved for Linux, not the build machine's OS.
+#
+#   --only-binary :all: ensures only packages with pre-built wheels
+#   are considered (offline host has no C compiler).
+#
+echo "[1/3] Resolving dependency tree for Linux x86_64..."
 
-TMP_VENV=$(mktemp -d)
-trap "rm -rf ${TMP_VENV}" EXIT
+uv pip compile "${SCRIPT_DIR}/requirements.txt" \
+    --python-platform x86_64-unknown-linux-gnu \
+    --only-binary :all: \
+    --output-file "${PACKAGES_DIR}/requirements-frozen.txt"
 
-python3 -m venv "${TMP_VENV}"
-"${TMP_VENV}/bin/pip" install --quiet -r "${SCRIPT_DIR}/requirements.txt"
-"${TMP_VENV}/bin/pip" freeze --local > "${PACKAGES_DIR}/requirements-frozen.txt"
-
-DEP_COUNT=$(wc -l < "${PACKAGES_DIR}/requirements-frozen.txt")
-echo "       Resolved ${DEP_COUNT} packages (streamlit + all transitive deps)"
+DEP_COUNT=$(grep -c '^\w' "${PACKAGES_DIR}/requirements-frozen.txt" || echo 0)
+echo "      Resolved ${DEP_COUNT} packages"
 echo ""
 
-# Step 2: Download exact resolved packages for the target Linux platform
-echo "[2/3] Downloading for manylinux2014_x86_64 / cp311..."
+# === Step 2: Download wheels for Linux x86_64 ===
+echo "[2/3] Downloading wheels..."
 
-pip download \
-    --platform manylinux2014_x86_64 \
-    --python-version 311 \
-    --abi cp311 \
-    --only-binary=:all: \
+uv pip download \
+    --python-platform x86_64-unknown-linux-gnu \
+    --only-binary :all: \
     -r "${PACKAGES_DIR}/requirements-frozen.txt" \
     -d "${PACKAGES_DIR}"
-
-# Clean up the frozen list (it's already captured in the wheels)
-rm -f "${PACKAGES_DIR}/requirements-frozen.txt"
 
 FILE_COUNT=$(ls -1 "${PACKAGES_DIR}"/*.whl 2>/dev/null | wc -l)
 TOTAL_SIZE=$(du -sh "${PACKAGES_DIR}" 2>/dev/null | cut -f1)
 
 echo ""
-echo "[3/3] Done. ${FILE_COUNT} wheels, ${TOTAL_SIZE}"
+echo "[3/3] Done — ${FILE_COUNT} wheels, ${TOTAL_SIZE}"
 echo ""
+
 echo "========================================"
-echo "Deploy"
+echo "Deploy to offline host"
 echo "========================================"
 echo " 1. Copy install_bastion/ to the offline host"
-echo " 2. Ensure config/cluster_config.json is in place"
-echo " 3. Run: ./install_on_host.sh"
+echo " 2. cd ~/install_bastion"
+echo " 3. ./install_on_host.sh"
 echo ""
