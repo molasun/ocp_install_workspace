@@ -45,7 +45,7 @@ echo "[2/4] Setting up venv..."
 
 if command -v uv &> /dev/null; then
     echo "      Using uv to create venv"
-    uv venv .venv --python 3.11 2>/dev/null || uv venv .venv
+    uv venv .venv --python 3.12 2>/dev/null || uv venv .venv
 else
     echo "      Using python3 -m venv (uv not found)"
     if [ ! -d ".venv" ]; then
