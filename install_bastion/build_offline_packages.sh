@@ -1,6 +1,6 @@
 #!/bin/bash
 #==============================================================================
-# 使用 uv 解析並安裝依賴，再匯出清單供 pip 下載離線 wheel
+# 使用 pip 解析並下載離線 wheel，供 RHEL 9 離線環境安裝
 #
 # 前提：建置機器與目標離線主機皆為 RHEL 9 x86_64
 #
@@ -25,52 +25,26 @@ echo "========================================"
 echo "Output:  ${PACKAGES_DIR}"
 echo ""
 
-if ! command -v uv &> /dev/null; then
-    echo "ERROR: uv is not installed."
-    exit 1
-fi
-
-echo "uv:      $(uv --version)"
-echo ""
-
 rm -rf "${PACKAGES_DIR}"
 mkdir -p "${PACKAGES_DIR}"
 
-# === Step 1: Resolve by actually INSTALLING (not just compiling) ===
-#
-#   uv pip compile 使用快取的索引，曾解析出 PyPI 不存在的 altair 6.2.2。
-#   改用實際 uv pip install → uv pip freeze：
-#     — uv 必須從 PyPI 真實下載套件，保證解析的版本確實存在
-#
-echo "[1/3] Resolving dependencies via uv pip install..."
+# === Step 1: Resolve with pip ===
+#   用 pip 解析和 freeze（同一 index，保證 resolve 和 download 一致）
+echo "[1/3] Resolving dependencies..."
 
 TMP_VENV=$(mktemp -d)
 trap "rm -rf ${TMP_VENV}" EXIT
 
-uv venv "${TMP_VENV}" --seed
-uv pip install \
-    --reinstall \
-    --refresh \
-    --no-deps \
-    -r "${SCRIPT_DIR}/requirements.txt" \
-    --python "${TMP_VENV}/bin/python3"
-
-uv pip install \
-    --reinstall \
-    --refresh \
-    -r "${SCRIPT_DIR}/requirements.txt" \
-    --python "${TMP_VENV}/bin/python3"
-
-uv pip freeze \
-    --python "${TMP_VENV}/bin/python3" \
-    > "${PACKAGES_DIR}/requirements-frozen.txt"
+python3 -m venv "${TMP_VENV}"
+"${TMP_VENV}/bin/pip" install --quiet -r "${SCRIPT_DIR}/requirements.txt"
+"${TMP_VENV}/bin/pip" freeze --local > "${PACKAGES_DIR}/requirements-frozen.txt"
 
 ST_VERSION=$(grep '^streamlit==' "${PACKAGES_DIR}/requirements-frozen.txt" || echo "streamlit")
 DEP_COUNT=$(wc -l < "${PACKAGES_DIR}/requirements-frozen.txt")
 echo "      ${ST_VERSION} + ${DEP_COUNT} transitive deps"
 echo ""
 
-# === Step 2: pip download the exact frozen list ===
+# === Step 2: pip download the frozen list ===
 echo "[2/3] Downloading wheels..."
 
 pip download \
