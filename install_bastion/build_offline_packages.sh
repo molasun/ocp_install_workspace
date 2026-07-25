@@ -1,6 +1,6 @@
 #!/bin/bash
 #==============================================================================
-# 使用 uv 解析依賴並下載離線 wheel，供 RHEL 9 離線環境安裝
+# 使用 uv 解析並安裝依賴，再匯出清單供 pip 下載離線 wheel
 #
 # 前提：建置機器與目標離線主機皆為 RHEL 9 x86_64
 #
@@ -22,41 +22,52 @@ PACKAGES_DIR="${SCRIPT_DIR}/packages"
 echo "========================================"
 echo "Build offline packages"
 echo "========================================"
-echo "System:  $(uname -m), $(. /etc/os-release 2>/dev/null && echo ${PRETTY_NAME:-RHEL})"
 echo "Output:  ${PACKAGES_DIR}"
 echo ""
 
-# Verify uv is available
 if ! command -v uv &> /dev/null; then
     echo "ERROR: uv is not installed."
-    echo "       Install: curl -LsSf https://astral.sh/uv/install.sh | sh"
     exit 1
 fi
 
 echo "uv:      $(uv --version)"
 echo ""
 
-# Clean
 rm -rf "${PACKAGES_DIR}"
 mkdir -p "${PACKAGES_DIR}"
 
-# === Step 1: uv pip compile ===
-#   建置機器就是目標 RHEL 9，不需要 --python-platform 跨平台標記。
-#   uv 直接使用本地 Python 和平台解析，解析結果與離線主機一致。
-echo "[1/3] Resolving dependency tree..."
+# === Step 1: Resolve by actually INSTALLING (not just compiling) ===
+#
+#   uv pip compile 使用快取的索引，曾解析出 PyPI 不存在的 altair 6.2.2。
+#   改用實際 uv pip install → uv pip freeze：
+#     — uv 必須從 PyPI 真實下載套件，保證解析的版本確實存在
+#
+echo "[1/3] Resolving dependencies via uv pip install..."
 
-uv pip compile "${SCRIPT_DIR}/requirements.txt" \
-    --only-binary :all: \
-    --output-file "${PACKAGES_DIR}/requirements-frozen.txt"
+TMP_VENV=$(mktemp -d)
+trap "rm -rf ${TMP_VENV}" EXIT
 
-DEP_COUNT=$(grep -c '^\w' "${PACKAGES_DIR}/requirements-frozen.txt" || echo 0)
-echo "      Resolved ${DEP_COUNT} packages"
+uv venv "${TMP_VENV}" --seed
+uv pip install \
+    --reinstall \
+    --no-deps \
+    -r "${SCRIPT_DIR}/requirements.txt" \
+    --python "${TMP_VENV}/bin/python3"
+
+uv pip install \
+    -r "${SCRIPT_DIR}/requirements.txt" \
+    --python "${TMP_VENV}/bin/python3"
+
+uv pip freeze \
+    --python "${TMP_VENV}/bin/python3" \
+    > "${PACKAGES_DIR}/requirements-frozen.txt"
+
+ST_VERSION=$(grep '^streamlit==' "${PACKAGES_DIR}/requirements-frozen.txt" || echo "streamlit")
+DEP_COUNT=$(wc -l < "${PACKAGES_DIR}/requirements-frozen.txt")
+echo "      ${ST_VERSION} + ${DEP_COUNT} transitive deps"
 echo ""
 
-# === Step 2: pip download ===
-#   下載當前機器架構對應的 wheel。建置機器 = 目標機器。
-#   uv pip compile 已用 --only-binary 確保解析的都是有 wheel 的版本，
-#   這裡不重複加 --only-binary（避免 uv/pip 可見的 PyPI 版本不一致）。
+# === Step 2: pip download the exact frozen list ===
 echo "[2/3] Downloading wheels..."
 
 pip download \
