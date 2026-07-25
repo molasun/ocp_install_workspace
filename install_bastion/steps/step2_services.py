@@ -175,21 +175,14 @@ def render_step2_services():
     
     with col_nav2:
         if st.session_state.step2_executed:
-            # 檢查是否所有必要步驟都成功
             results = st.session_state.step2_results
             all_success = all(r.get('success', False) for r in results.values())
             
             if all_success:
-                btn_label = t('step2.next_step3')
-                btn_type = "primary"
-            else:
-                btn_label = t('step2.skip_step3')
-                btn_type = "secondary"
-            
-            if st.button(btn_label, type=btn_type, use_container_width=True):
-                st.session_state.step2_complete = True
-                st.session_state.current_step = 3
-                st.rerun()
+                if st.button(t('step2.next_step3'), type="primary", use_container_width=True):
+                    st.session_state.step2_complete = True
+                    st.session_state.current_step = 3
+                    st.rerun()
 
     # === 重試按鈕（如果已執行但有失敗） ===
     if st.session_state.step2_executed:
