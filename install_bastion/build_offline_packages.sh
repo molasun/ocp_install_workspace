@@ -2,9 +2,7 @@
 #==============================================================================
 # 使用 uv 解析依賴並下載離線 wheel，供 RHEL 9 離線環境安裝
 #
-# 前置：
-#   - 已安裝 uv（開發環境使用 uv 管理套件）
-#   - install_bastion/requirements.txt 已定義依賴
+# 前提：建置機器與目標離線主機皆為 RHEL 9 x86_64
 #
 # 使用方式：
 #   cd install_bastion
@@ -12,8 +10,8 @@
 #   ./build_offline_packages.sh
 #
 # 輸出：
-#   install_bastion/packages/requirements-frozen.txt  （完整的鎖定依賴清單）
-#   install_bastion/packages/*.whl                    （Linux x86_64 wheel）
+#   install_bastion/packages/requirements-frozen.txt
+#   install_bastion/packages/*.whl
 #==============================================================================
 
 set -euo pipefail
@@ -22,10 +20,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PACKAGES_DIR="${SCRIPT_DIR}/packages"
 
 echo "========================================"
-echo "Build offline packages (uv)"
+echo "Build offline packages"
 echo "========================================"
-echo "Target:  RHEL 9 (x86_64-unknown-linux-gnu)"
-echo "Python:  3.11"
+echo "System:  $(uname -m), $(. /etc/os-release 2>/dev/null && echo ${PRETTY_NAME:-RHEL})"
 echo "Output:  ${PACKAGES_DIR}"
 echo ""
 
@@ -36,29 +33,19 @@ if ! command -v uv &> /dev/null; then
     exit 1
 fi
 
-UV_VERSION=$(uv --version)
-echo "uv:      ${UV_VERSION}"
+echo "uv:      $(uv --version)"
 echo ""
 
 # Clean
 rm -rf "${PACKAGES_DIR}"
 mkdir -p "${PACKAGES_DIR}"
 
-# === Step 1: Resolve full dependency tree with uv ===
-#
-#   uv pip compile reads requirements.txt, resolves ALL transitive
-#   deps, and outputs a fully pinned requirements file.
-#
-#   --python-platform ensures platform-specific packages (like numpy)
-#   are resolved for Linux, not the build machine's OS.
-#
-#   --only-binary :all: ensures only packages with pre-built wheels
-#   are considered (offline host has no C compiler).
-#
-echo "[1/3] Resolving dependency tree for Linux x86_64..."
+# === Step 1: uv pip compile ===
+#   建置機器就是目標 RHEL 9，不需要 --python-platform 跨平台標記。
+#   uv 直接使用本地 Python 和平台解析，解析結果與離線主機一致。
+echo "[1/3] Resolving dependency tree..."
 
 uv pip compile "${SCRIPT_DIR}/requirements.txt" \
-    --python-platform x86_64-unknown-linux-gnu \
     --only-binary :all: \
     --output-file "${PACKAGES_DIR}/requirements-frozen.txt"
 
@@ -66,16 +53,12 @@ DEP_COUNT=$(grep -c '^\w' "${PACKAGES_DIR}/requirements-frozen.txt" || echo 0)
 echo "      Resolved ${DEP_COUNT} packages"
 echo ""
 
-# === Step 2: Download wheels for Linux x86_64 ===
-#   uv does not have a "pip download" equivalent.
-#   Use pip download with the frozen list from uv (exact versions
-#   already resolved — no dependency skipping issue).
+# === Step 2: pip download ===
+#   下載當前機器架構對應的 wheel。建置機器 = 目標機器，
+#   不需要 --platform 標記。
 echo "[2/3] Downloading wheels..."
-echo "      (using pip download, uv has no equivalent)"
 
 pip download \
-    --platform manylinux2014_x86_64 \
-    --python-version 311 \
     --only-binary=:all: \
     -r "${PACKAGES_DIR}/requirements-frozen.txt" \
     -d "${PACKAGES_DIR}"
