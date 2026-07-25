@@ -54,12 +54,12 @@ echo "      Resolved ${DEP_COUNT} packages"
 echo ""
 
 # === Step 2: pip download ===
-#   下載當前機器架構對應的 wheel。建置機器 = 目標機器，
-#   不需要 --platform 標記。
+#   下載當前機器架構對應的 wheel。建置機器 = 目標機器。
+#   uv pip compile 已用 --only-binary 確保解析的都是有 wheel 的版本，
+#   這裡不重複加 --only-binary（避免 uv/pip 可見的 PyPI 版本不一致）。
 echo "[2/3] Downloading wheels..."
 
 pip download \
-    --only-binary=:all: \
     -r "${PACKAGES_DIR}/requirements-frozen.txt" \
     -d "${PACKAGES_DIR}"
 
