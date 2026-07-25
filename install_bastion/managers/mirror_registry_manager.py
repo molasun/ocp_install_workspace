@@ -1,6 +1,5 @@
 import os
 import time
-import shutil
 from typing import Tuple, Optional
 from .base_manager import BaseManager
 
@@ -12,10 +11,12 @@ class MirrorRegistryManager(BaseManager):
         super().__init__(config, config_dir)
 
     def check_installed(self) -> Tuple[bool, str]:
-        """檢查 Mirror Registry 是否已安裝運行"""
+        """檢查 Mirror Registry 是否已安裝運行
+
+        mirror-registry 容器由 root 管理，需用 sudo podman 檢查。
+        """
         success, stdout, _ = self._run_command(
-            "podman ps --filter 'name=quay' --format '{{.Names}}' 2>/dev/null || "
-            "docker ps --filter 'name=quay' --format '{{.Names}}' 2>/dev/null"
+            "sudo podman ps --filter 'name=quay' --format '{{.Names}}' 2>/dev/null"
         )
         running_containers = [n.strip() for n in stdout.split('\n') if n.strip()] if success and stdout.strip() else []
 
@@ -33,12 +34,13 @@ class MirrorRegistryManager(BaseManager):
         return success and bool(stdout.strip())
 
     def _was_installed(self) -> bool:
-        """檢查 mirror-registry 是否曾安裝過（podman 容器存在即視為已安裝）"""
+        """檢查 mirror-registry 是否曾安裝過（root 的 podman 容器存在即視為已安裝）"""
         success, stdout, _ = self._run_command(
-            "podman ps -a --filter 'name=quay' --format '{{.Names}}' 2>/dev/null"
+            "sudo podman ps -a --filter 'name=quay' --format '{{.Names}}' 2>/dev/null"
         )
         if success and stdout.strip():
             return True
+        # 也檢查家目錄下是否有 mirror-registry 目錄
         return os.path.exists(os.path.expanduser("~/mirror-registry"))
 
     def install(self) -> Tuple[bool, str]:
@@ -181,49 +183,46 @@ class MirrorRegistryManager(BaseManager):
     def _cleanup_installation(self, quay_root: str, quay_storage: str) -> None:
         """清理舊的 Mirror Registry 安裝
 
-        優先使用 mirror-registry uninstall，失敗時手動清理 podman 資源。
+        mirror-registry 的容器/pod/volume 都屬於 root 用戶，
+        所有 podman 命令必須帶 sudo 才能操作這些資源。
         不使用 systemctl — mirror-registry 透過 podman 管理一切。
         """
         self._log("開始清理舊的 Mirror Registry 安裝...")
 
         home_dir = os.path.expanduser("~")
 
-        # 1. mirror-registry uninstall
+        # 1. 先移除 quay-pod（會同時移除 pod 內所有容器）
+        self._run_command("sudo podman pod rm -f quay-pod 2>/dev/null")
+        self._log("已移除 quay-pod")
+
+        # 2. 清理殘留的 quay 容器（不在 pod 中的情況）
+        self._run_command(
+            "sudo podman ps -a --filter 'name=quay' --format '{{.Names}}' 2>/dev/null | "
+            "xargs -r sudo podman rm -f 2>/dev/null"
+        )
+
+        # 3. 移除 volumes（關鍵：Redis 密碼存在 volume 裡，不清理會導致新安裝密碼不一致）
+        self._run_command(
+            "sudo podman volume ls -q 2>/dev/null | "
+            "grep -iE 'quay|sqlite|redis' | "
+            "xargs -r sudo podman volume rm -f 2>/dev/null"
+        )
+        self._log("已移除 quay 相關 volumes")
+
+        # 4. 嘗試 mirror-registry uninstall（清理遺留檔案）
         uninstall_cmd = (
             f"cd {home_dir} && ./mirror-registry uninstall "
             f"--quayRoot {quay_root} -y 2>/dev/null"
         )
-        success, _, _ = self._run_command(uninstall_cmd, timeout=120)
-        if success:
-            self._log("mirror-registry uninstall 完成")
-        else:
-            self._log("mirror-registry uninstall 失敗，手動清理 podman 資源", "WARNING")
-
-            # 2. 手動移除 quay 容器
-            self._run_command(
-                "podman ps -a --filter 'name=quay' --format '{{.Names}}' 2>/dev/null | "
-                "xargs -r podman rm -f 2>/dev/null"
-            )
-            self._log("已移除 quay 容器")
-
-            # 3. 移除 pod
-            self._run_command("podman pod rm -f quay-pod 2>/dev/null")
-
-            # 4. 移除 volumes
-            self._run_command(
-                "podman volume ls -q 2>/dev/null | "
-                "grep -iE 'quay|sqlite|redis' | "
-                "xargs -r podman volume rm -f 2>/dev/null"
-            )
+        _, _, _ = self._run_command(uninstall_cmd, timeout=120)
 
         # 5. 清除 quay 目錄
         for dir_path in [quay_root, quay_storage]:
-            if os.path.exists(dir_path):
-                try:
-                    shutil.rmtree(dir_path)
-                    self._log(f"已移除目錄: {dir_path}")
-                except Exception as e:
-                    self._log(f"移除目錄失敗 {dir_path}: {e}", "WARNING")
+            self._run_command(f"sudo rm -rf {dir_path} 2>/dev/null")
+            self._log(f"已移除目錄: {dir_path}")
+
+        # 6. 清除 quay 狀態目錄（~/.quay 存放 init 狀態等）
+        self._run_command("sudo rm -rf ~/.quay /root/.quay 2>/dev/null")
 
         self._log("清理完成")
 
