@@ -148,10 +148,14 @@ class MirrorRegistryManager(BaseManager):
 
         self._log("mirror-registry install 完成")
 
-        # 6. 信任 CA 憑證
+        # 6. 修正 Redis 密碼不一致（Ansible bug workaround）
+        #    Ansible 有時給 Quay config 和 Redis 容器生成不同密碼，導致 quay-app WRONGPASS
+        self._fix_redis_password(quay_root)
+
+        # 7. 信任 CA 憑證
         self._trust_ca(quay_root)
 
-        # 7. 健康檢查
+        # 8. 健康檢查
         self._log("等待 Quay 就緒...")
         for i in range(10):
             success, stdout, _ = self._run_command(
@@ -169,7 +173,7 @@ class MirrorRegistryManager(BaseManager):
                 f"📄 完整日誌: {log_path}"
             )
 
-        # 8. 執行 podman login 驗證
+        # 9. 執行 podman login 驗證
         verify_success, verify_msg = self.verify_connection()
         if verify_success:
             return True, "✅ Mirror Registry 安裝成功，健康檢查與連線驗證通過"
@@ -216,7 +220,60 @@ class MirrorRegistryManager(BaseManager):
         )
         self._log(f"已移除 {quay_root}, {quay_storage}, ~/.quay")
 
+        # 6. 清除 Ansible 建立的 systemd service（quay-app.service 等）
+        self._run_command("sudo rm -f /etc/systemd/system/quay-*.service 2>/dev/null")
+        self._run_command("sudo systemctl daemon-reload 2>/dev/null")
+        self._log("已移除 quay systemd service")
+
         self._log("清理完成")
+
+    def _fix_redis_password(self, quay_root: str) -> None:
+        """修正 mirror-registry Ansible 造成的 Redis 密碼不一致
+
+        Ansible playbook 可能給 Quay config.yaml 和 Redis 容器產生不同的隨機密碼，
+        導致 quay-app 啟動時報 WRONGPASS 無法連接 Redis。
+        此方法從 Redis 容器內讀取真實 requirepass，回寫到 Quay config 後重啟 quay-app。
+        """
+        config_yaml = f"{quay_root}/quay-config/config.yaml"
+
+        # 1. 從 Redis 容器內取得實際 requirepass
+        success, stdout, _ = self._run_command(
+            "sudo podman exec quay-redis grep '^requirepass' /etc/redis.conf 2>/dev/null | "
+            "head -1 | sed 's/.*\"\\(.*\\)\".*/\\1/'"
+        )
+        if not success or not stdout.strip():
+            self._log("無法讀取 Redis requirepass，跳過密碼修正", "WARNING")
+            return
+        redis_password = stdout.strip()
+
+        # 2. 比對 Quay config 中的 Redis 密碼
+        success, stdout, _ = self._run_command(
+            f"sudo grep -A3 'USER_EVENTS_REDIS:' {config_yaml} 2>/dev/null | "
+            "grep 'password:' | awk '{print $2}'"
+        )
+        if success and stdout.strip() == redis_password:
+            self._log("Redis 密碼一致，無需修正")
+            return
+
+        # 3. 密碼不一致 — 將 Redis 的真實密碼寫回 Quay config
+        self._log(
+            f"偵測到 Redis 密碼不一致，"
+            f"修正 Quay config 為 Redis 實際密碼..."
+        )
+        self._run_command(
+            f"sudo sed -i '/BUILDLOGS_REDIS:/,/password:/"
+            f"s/password:.*/password: {redis_password}/' {config_yaml}"
+        )
+        self._run_command(
+            f"sudo sed -i '/USER_EVENTS_REDIS:/,/password:/"
+            f"s/password:.*/password: {redis_password}/' {config_yaml}"
+        )
+        self._log(f"已修正 Quay config Redis 密碼為: {redis_password}")
+
+        # 4. 重啟 quay-app 讓新密碼生效
+        self._run_command("sudo podman restart quay-app 2>/dev/null")
+        self._run_command("sudo systemctl restart quay-app.service 2>/dev/null")
+        self._log("已重啟 quay-app 使新密碼生效")
 
     def _find_mirror_registry_tar(self) -> Optional[str]:
         """尋找 mirror-registry 安裝包"""
