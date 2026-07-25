@@ -45,9 +45,13 @@ echo "      ${ST_VERSION} + ${DEP_COUNT} transitive deps"
 echo ""
 
 # === Step 2: pip download the frozen list ===
-echo "[2/3] Downloading wheels..."
+#   建置機器 Python 版本可能與離線主機不同（如 3.9 vs 3.12）。
+#   加上 --python-version + --only-binary 強制下載目標版本的 wheel。
+echo "[2/3] Downloading wheels (target Python 3.12)..."
 
 pip download \
+    --python-version 3.12 \
+    --only-binary=:all: \
     -r "${PACKAGES_DIR}/requirements-frozen.txt" \
     -d "${PACKAGES_DIR}"
 
