@@ -189,12 +189,14 @@ class MirrorRegistryManager(BaseManager):
     def _thorough_cleanup(self, quay_root: str, quay_storage: str) -> None:
         """徹底清理所有 Mirror Registry 殘留，確認清理完畢後才返回
 
-        清理範圍:
-          - podman pod / 容器 / volume / image
-          - mirror-registry 官方 uninstall
-          - 檔案目錄: quayRoot, quayStorage, ~/mirror-registry, ~/.quay, /root/.quay
-          - systemd service 檔案
-          - CA 憑證
+        清理順序（重要）:
+          1. 停止 systemd service — 避免 systemd 重啟容器導致 volume 無法刪除
+          2. 移除 podman pod / 容器
+          3. mirror-registry 官方 uninstall
+          4. 移除檔案目錄
+          5. 移除 podman image
+          6. 清理 podman volume — 必須在所有容器移除後才有效
+          7. 移除 CA 憑證
 
         清理完畢後呼叫 _verify_cleanup() 確認，不乾淨則重試。
         """
@@ -207,25 +209,25 @@ class MirrorRegistryManager(BaseManager):
         for attempt in range(1, self._CLEANUP_MAX_RETRIES + 1):
             self._log(f"--- 清理第 {attempt}/{self._CLEANUP_MAX_RETRIES} 次 ---")
 
-            # 1. podman 容器 / pod
-            self._cleanup_podman_containers()
-
-            # 2. podman volume（prune 只清無主 volume，不影響其他應用）
-            self._cleanup_podman_volumes()
-
-            # 3. podman image（mirror-registry 相關）
-            self._cleanup_podman_images()
-
-            # 4. mirror-registry 官方 uninstall
-            self._run_official_uninstall(home_dir, quay_root)
-
-            # 5. 檔案目錄清理
-            self._cleanup_directories(quay_root, quay_storage, home_dir)
-
-            # 6. systemd service
+            # 1. 先停 systemd service（避免重啟容器導致 volume 被佔用）
             self._cleanup_systemd()
 
-            # 7. CA 憑證
+            # 2. 移除 podman pod / 容器
+            self._cleanup_podman_containers()
+
+            # 3. mirror-registry 官方 uninstall
+            self._run_official_uninstall(home_dir, quay_root)
+
+            # 4. 移除檔案目錄
+            self._cleanup_directories(quay_root, quay_storage, home_dir)
+
+            # 5. 移除 podman image
+            self._cleanup_podman_images()
+
+            # 6. 清理 podman volume（必須在所有容器移除後執行）
+            self._cleanup_podman_volumes()
+
+            # 7. 移除 CA 憑證
             self._cleanup_ca_cert()
 
             # 驗證清理完畢
@@ -303,10 +305,22 @@ class MirrorRegistryManager(BaseManager):
         self._log(f"已移除目錄: {', '.join(dirs_to_remove)}")
 
     def _cleanup_systemd(self) -> None:
-        """移除 mirror-registry 建立的 systemd service"""
+        """停止並移除 mirror-registry 建立的 systemd service
+
+        必須先 stop 再刪檔案，否則 systemd 會在容器被刪後重啟它們，
+        導致 podman volume 持續被佔用無法清理。
+        """
+        # 先停止所有 quay 相關 service
+        self._run_command(
+            "sudo systemctl stop quay-app.service quay-redis.service "
+            "quay-pod.service 2>/dev/null || true"
+        )
+        self._log("已停止 quay systemd services")
+
+        # 再移除 service 檔案
         self._run_command("sudo rm -f /etc/systemd/system/quay-*.service 2>/dev/null")
         self._run_command("sudo systemctl daemon-reload 2>/dev/null")
-        self._log("已移除 quay systemd service")
+        self._log("已移除 quay systemd service 檔案")
 
     def _cleanup_ca_cert(self) -> None:
         """移除 mirror-registry 新增的 CA 憑證"""
