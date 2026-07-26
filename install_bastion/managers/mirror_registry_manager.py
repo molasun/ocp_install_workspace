@@ -131,7 +131,6 @@ class MirrorRegistryManager(BaseManager):
           - 檔案目錄: quayRoot, quayStorage, ~/mirror-registry, ~/.quay, /root/.quay
           - systemd service 檔案
           - CA 憑證
-          - root SSH key（安裝時建立的）
 
         清理完畢後呼叫 _verify_cleanup() 確認，不乾淨則重試。
         """
@@ -164,9 +163,6 @@ class MirrorRegistryManager(BaseManager):
 
             # 7. CA 憑證
             self._cleanup_ca_cert()
-
-            # 8. SSH key
-            self._cleanup_root_ssh()
 
             # 驗證清理完畢
             if self._verify_cleanup(quay_root, quay_storage, home_dir):
@@ -255,19 +251,6 @@ class MirrorRegistryManager(BaseManager):
         self._run_command("sudo update-ca-trust 2>/dev/null")
         self._log("已移除 mirror-registry CA 憑證")
 
-    def _cleanup_root_ssh(self) -> None:
-        """移除安裝時建立的 root SSH key
-
-        只刪除我們自己建立的 id_rsa，不影響其他已存在的 key。
-        同時移除 authorized_keys 中對應的 public key。
-        """
-        self._run_command("sudo rm -f /root/.ssh/id_rsa /root/.ssh/id_rsa.pub 2>/dev/null")
-        # 清除 authorized_keys 中由本機 rsa key 產生的條目
-        self._run_command(
-            "sudo sed -i '/ssh-rsa.*root@/d' /root/.ssh/authorized_keys 2>/dev/null || true"
-        )
-        self._log("已移除安裝時建立的 root SSH key")
-
     def _verify_cleanup(self, quay_root: str, quay_storage: str, home_dir: str) -> bool:
         """驗證清理完畢，確認沒有殘留
 
@@ -334,24 +317,56 @@ class MirrorRegistryManager(BaseManager):
     # ------------------------------------------------------------------
 
     def _setup_root_ssh(self) -> bool:
-        """確保 root 免密碼 SSH 到 localhost
+        """確保 root 免密碼 SSH 到 localhost（idempotent）
 
         mirror-registry 的 Ansible playbook 需要透過 SSH 連線 localhost。
+        先測試現有 SSH 是否已可用，可用則跳過；不可用才重新生成 key。
         """
-        self._log("設定 root SSH 免密碼...")
-        success, _, err = self._run_command(
-            "sudo mkdir -p /root/.ssh && "
-            "sudo chmod 700 /root/.ssh && "
-            "sudo ssh-keygen -t rsa -f /root/.ssh/id_rsa -N '' -q; "
+        self._log("檢查 root SSH 免密碼...")
+
+        # 1. 先測試現有 SSH 連線是否已可用
+        success, _, _ = self._run_command(
+            "sudo ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 "
+            "-o PasswordAuthentication=no -o BatchMode=yes "
+            "root@localhost echo ok 2>/dev/null"
+        )
+        if success:
+            self._log("root SSH 免密碼已可用，無需重新設定")
+            return True
+
+        # 2. SSH 不可用 ── 建立 /root/.ssh 並修復權限
+        self._log("SSH 不可用，重新設定 root SSH key...")
+        self._run_command("sudo mkdir -p /root/.ssh && sudo chmod 700 /root/.ssh")
+
+        # 3. 若 id_rsa 不存在才生成新的（避免覆蓋已有的 key）
+        exists, _, _ = self._run_command("sudo test -f /root/.ssh/id_rsa && echo yes || echo no")
+        if "yes" not in exists:
+            self._log("產生新的 root SSH key pair...")
+            gen_ok, _, gen_err = self._run_command(
+                "sudo ssh-keygen -t rsa -f /root/.ssh/id_rsa -N '' -q"
+            )
+            if not gen_ok:
+                self._log(f"ssh-keygen 失敗: {gen_err}", "ERROR")
+                return False
+
+        # 4. 確保 public key 在 authorized_keys 中
+        self._run_command(
             "sudo sh -c 'cat /root/.ssh/id_rsa.pub >> /root/.ssh/authorized_keys' && "
             "sudo sort -u /root/.ssh/authorized_keys -o /root/.ssh/authorized_keys && "
-            "sudo chmod 600 /root/.ssh/authorized_keys && "
-            "sudo ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@localhost echo ok"
+            "sudo chmod 600 /root/.ssh/authorized_keys"
+        )
+
+        # 5. 再次測試連線
+        success, _, err = self._run_command(
+            "sudo ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 "
+            "-o PasswordAuthentication=no -o BatchMode=yes "
+            "root@localhost echo ok"
         )
         if success:
             self._log("root SSH 設定成功")
             return True
-        self._log(f"root SSH 設定失敗: {err}", "ERROR")
+
+        self._log(f"root SSH 設定後仍無法連線: {err}", "ERROR")
         return False
 
     # ------------------------------------------------------------------
