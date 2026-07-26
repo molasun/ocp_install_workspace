@@ -14,9 +14,11 @@ class MirrorRegistryManager(BaseManager):
         """檢查 Mirror Registry 是否已安裝運行
 
         mirror-registry 容器由 root 管理，需用 sudo podman 檢查。
+        用 grep 而非 --filter 因為 ansible_runner_instance 不包含 'quay'。
         """
         success, stdout, _ = self._run_command(
-            "sudo podman ps --filter 'name=quay' --format '{{.Names}}' 2>/dev/null"
+            "sudo podman ps --format '{{.Names}}' 2>/dev/null | "
+            "grep -iE 'quay|ansible_runner'"
         )
         running_containers = [n.strip() for n in stdout.split('\n') if n.strip()] if success and stdout.strip() else []
 
@@ -36,7 +38,8 @@ class MirrorRegistryManager(BaseManager):
     def _was_installed(self) -> bool:
         """檢查 mirror-registry 是否曾安裝過（root 的 podman 容器存在即視為已安裝）"""
         success, stdout, _ = self._run_command(
-            "sudo podman ps -a --filter 'name=quay' --format '{{.Names}}' 2>/dev/null"
+            "sudo podman ps -a --format '{{.Names}}' 2>/dev/null | "
+            "grep -iE 'quay|ansible_runner'"
         )
         if success and stdout.strip():
             return True
@@ -193,9 +196,10 @@ class MirrorRegistryManager(BaseManager):
         # 1. 先移除 quay-pod（會同時移除 pod 內所有容器）
         self._run_command("sudo podman pod rm -f quay-pod 2>/dev/null")
 
-        # 2. 清理殘留的 quay 容器（不在 pod 中的情況）
+        # 2. 清理殘留容器（包含 ansible_runner_instance，其名稱不含 quay）
         self._run_command(
-            "sudo podman ps -a --filter 'name=quay' --format '{{.Names}}' 2>/dev/null | "
+            "sudo podman ps -a --format '{{.Names}}' 2>/dev/null | "
+            "grep -iE 'quay|ansible_runner' | "
             "xargs -r sudo podman rm -f 2>/dev/null"
         )
         self._log("已移除 quay-pod 及所有 quay 容器")
