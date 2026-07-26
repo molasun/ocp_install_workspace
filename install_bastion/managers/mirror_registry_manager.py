@@ -45,7 +45,16 @@ class MirrorRegistryManager(BaseManager):
     def install(self) -> Tuple[bool, str]:
         """安裝 Mirror Registry
 
-        完整流程：連線檢測 → 徹底清理 → 準備環境 → 解壓 → 安裝 → 修復 → 驗證
+        完整流程：
+          1. 連線測試 → 若已運行則直接返回
+          2. 快速修復 → 若容器已存在但密碼不對，先嘗試修復（不重裝）
+          3. 徹底清理 → 移除所有舊安裝殘留
+          4. 準備環境 → /etc/hosts、SSH
+          5. 解壓安裝包
+          6. 執行 mirror-registry install
+          7. 修正 Redis 密碼不一致
+          8. 信任 CA 憑證
+          9. 健康檢查 + 連線驗證
         """
         quay_root = self.config.get('quayRoot', '/opt/quay')
         quay_storage = self.config.get('quayStorage', '/opt/quay-storage')
@@ -57,12 +66,16 @@ class MirrorRegistryManager(BaseManager):
             self._log("Mirror Registry 已運行且連線正常，跳過安裝")
             return True, "Mirror Registry 已安裝並運行"
 
-        self._log(f"連線驗證失敗 ({connect_msg})，開始安裝流程...")
+        self._log(f"連線驗證失敗 ({connect_msg})")
 
-        # ── Step 2: 徹底清理舊安裝 ──
+        # ── Step 2: 快速修復（若容器已存在，先嘗試修復密碼，不重裝） ──
+        if self._try_quick_fix(quay_root, bastion_fqdn):
+            return True, "✅ Mirror Registry 快速修復成功（Redis 密碼已修正）"
+
+        # ── Step 3: 徹底清理舊安裝 ──
         self._thorough_cleanup(quay_root, quay_storage)
 
-        # ── Step 3: 準備環境 ──
+        # ── Step 4: 準備環境 ──
         self._ensure_hosts_entry(
             self.config.get('bastion', {}).get('ip', ''),
             bastion_fqdn
@@ -70,7 +83,7 @@ class MirrorRegistryManager(BaseManager):
         if not self._setup_root_ssh():
             return False, "root SSH 免密碼設定失敗"
 
-        # ── Step 4: 解壓安裝包 ──
+        # ── Step 5: 解壓安裝包 ──
         home_dir = os.path.expanduser("~")
         tar_path = self._find_mirror_registry_tar()
         if not tar_path:
@@ -80,18 +93,18 @@ class MirrorRegistryManager(BaseManager):
         if not self._extract_installer(tar_path, home_dir):
             return False, "解壓 mirror-registry 失敗"
 
-        # ── Step 5: 執行安裝 ──
+        # ── Step 6: 執行安裝 ──
         log_path = self._run_mirror_registry_install(
             home_dir, bastion_fqdn, quay_root, quay_storage
         )
 
-        # ── Step 6: 修正 Redis 密碼不一致（Ansible bug workaround） ──
+        # ── Step 7: 修正 Redis 密碼不一致（Ansible bug workaround） ──
         self._fix_redis_password(quay_root)
 
-        # ── Step 7: 信任 CA ──
+        # ── Step 8: 信任 CA ──
         self._trust_ca(quay_root)
 
-        # ── Step 8: 健康檢查 + 連線驗證 ──
+        # ── Step 9: 健康檢查 + 連線驗證 ──
         if not self._health_check(bastion_fqdn):
             return False, (
                 f"安裝完成但 Quay 健康檢查未通過\n\n"
@@ -119,7 +132,58 @@ class MirrorRegistryManager(BaseManager):
         return False, f"Registry 連線失敗: {stderr[:200]}"
 
     # ------------------------------------------------------------------
-    # Step 2: 徹底清理
+    # Step 2: 快速修復（不重裝，只修 Redis 密碼）
+    # ------------------------------------------------------------------
+
+    def _try_quick_fix(self, quay_root: str, bastion_fqdn: str) -> bool:
+        """嘗試快速修復：若 Quay 容器已存在但 Redis 密碼不一致，直接修正
+
+        適用場景：mirror-registry install 已跑完，但 quay-app 因 Redis
+        密碼不一致而 Degraded。此時不需要整個重裝，只需修密碼後重啟。
+
+        Returns:
+            True = 修復成功，Quay 已恢復正常
+            False = 不適用快速修復（容器不存在 / 修復無效），需完整重裝
+        """
+        # 1. 檢查 quay-redis 容器是否在運行（快速修復的前提）
+        redis_ok, _, _ = self._run_command(
+            "sudo podman ps --format '{{.Names}}' 2>/dev/null | "
+            "grep -w 'quay-redis'"
+        )
+        if not redis_ok:
+            self._log("quay-redis 未運行，不適用快速修復，需完整重裝")
+            return False
+
+        # 2. 檢查 config.yaml 是否存在
+        config_yaml = f"{quay_root}/quay-config/config.yaml"
+        if not os.path.exists(config_yaml):
+            self._log("config.yaml 不存在，不適用快速修復")
+            return False
+
+        self._log("偵測到 Quay 容器已存在，嘗試快速修復 Redis 密碼...")
+
+        # 3. 修正 Redis 密碼
+        self._fix_redis_password(quay_root)
+
+        # 4. 確保 CA 憑證已信任（可能上次安裝中斷未完成）
+        self._trust_ca(quay_root)
+
+        # 5. 健康檢查 — 等待 quay-app 用新密碼啟動
+        if self._health_check(bastion_fqdn):
+            # 6. 連線驗證
+            connected, _ = self.verify_connection()
+            if connected:
+                self._log("✅ 快速修復成功！Redis 密碼已修正，Quay 恢復正常")
+                return True
+            self._log("快速修復後健康檢查通過，但連線驗證失敗", "WARNING")
+        else:
+            self._log("快速修復後健康檢查未通過", "WARNING")
+
+        self._log("快速修復無效，將執行完整重裝...")
+        return False
+
+    # ------------------------------------------------------------------
+    # Step 3: 徹底清理
     # ------------------------------------------------------------------
 
     def _thorough_cleanup(self, quay_root: str, quay_storage: str) -> None:
