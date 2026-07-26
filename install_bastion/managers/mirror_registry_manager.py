@@ -578,15 +578,21 @@ class MirrorRegistryManager(BaseManager):
     # ------------------------------------------------------------------
 
     def _health_check(self, bastion_fqdn: str, max_retries: int = 10, interval: int = 30) -> bool:
-        """等待 Quay 就緒，輪詢 /v2/ endpoint"""
+        """等待 Quay 就緒，輪詢 /v2/ endpoint
+
+        Quay 的 /v2/ 端點在正常運作時可能返回：
+          - 200：無需認證即可存取
+          - 401：需要認證（表示 Quay 已啟動並正常回應）
+        兩者都代表 Quay 健康。
+        """
         self._log("等待 Quay 就緒...")
         for i in range(max_retries):
             success, stdout, _ = self._run_command(
                 f"curl -sk -o /dev/null -w '%{{http_code}}' "
                 f"--connect-timeout 5 https://{bastion_fqdn}:8443/v2/"
             )
-            if success and "200" in stdout:
-                self._log("Quay 健康檢查通過！")
+            if success and stdout.strip() in ("200", "401"):
+                self._log(f"Quay 健康檢查通過！ (HTTP {stdout.strip()})")
                 return True
             self._log(f"等待 Quay 就緒... ({i + 1}/{max_retries})")
             time.sleep(interval)
