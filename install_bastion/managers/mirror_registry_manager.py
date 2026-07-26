@@ -224,10 +224,13 @@ class MirrorRegistryManager(BaseManager):
             # 5. 移除 podman image
             self._cleanup_podman_images()
 
-            # 6. 清理 podman volume（必須在所有容器移除後執行）
+            # 6. 移除 podman secrets（Redis 密碼等，避免重裝時複用舊密碼）
+            self._cleanup_podman_secrets()
+
+            # 7. 清理 podman volume（必須在所有容器移除後執行）
             self._cleanup_podman_volumes()
 
-            # 7. 移除 CA 憑證
+            # 8. 移除 CA 憑證
             self._cleanup_ca_cert()
 
             # 驗證清理完畢
@@ -276,6 +279,19 @@ class MirrorRegistryManager(BaseManager):
                 f"xargs -r sudo podman rmi -f 2>/dev/null"
             )
         self._log("已移除 mirror-registry 相關 podman images")
+
+    def _cleanup_podman_secrets(self) -> None:
+        """移除 mirror-registry 建立的 podman secrets
+
+        mirror-registry 的 Ansible 會用 podman secret 儲存 Redis 密碼，
+        如果不清理，重裝時 Ansible 會複用舊的 secret（舊密碼），
+        但同時給 config.yaml 生成新密碼，導致密碼不一致。
+        """
+        self._run_command(
+            "sudo podman secret ls --format '{{.Name}}' 2>/dev/null | "
+            "xargs -r sudo podman secret rm 2>/dev/null"
+        )
+        self._log("已移除所有 podman secrets")
 
     def _run_official_uninstall(self, home_dir: str, quay_root: str) -> None:
         """執行 mirror-registry 官方 uninstall 腳本"""
