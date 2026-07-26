@@ -336,10 +336,10 @@ class MirrorRegistryManager(BaseManager):
 
         # 2. 若 ed25519 key 不存在則生成
         key_path = "/root/.ssh/id_ed25519"
-        exists, _, _ = self._run_command(
+        _, stdout, _ = self._run_command(
             f"sudo test -f {key_path} && echo yes || echo no"
         )
-        if "yes" not in exists:
+        if "yes" not in stdout:
             self._log("產生新的 root SSH key pair (ed25519)...")
             gen_ok, _, gen_err = self._run_command(
                 f"sudo ssh-keygen -t ed25519 -f {key_path} -N '' -q"
