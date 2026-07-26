@@ -317,56 +317,76 @@ class MirrorRegistryManager(BaseManager):
     # ------------------------------------------------------------------
 
     def _setup_root_ssh(self) -> bool:
-        """確保 root 免密碼 SSH 到 localhost（idempotent）
+        """確保 root 免密碼 SSH 到自身（透過系統 hostname）
 
-        mirror-registry 的 Ansible playbook 需要透過 SSH 連線 localhost。
-        先測試現有 SSH 是否已可用，可用則跳過；不可用才重新生成 key。
+        mirror-registry 的 Ansible playbook 連線到系統 hostname（非 localhost），
+        因此必須用系統 hostname 驗證。
+
+        使用 ed25519 金鑰（現代 OpenSSH 原生支援），避免 RSA 在 RHEL 9 /
+        容器化 Ansible runner 中的相容性問題。
         """
-        self._log("檢查 root SSH 免密碼...")
+        self._log("設定 root SSH 免密碼...")
 
-        # 1. 先測試現有 SSH 連線是否已可用
-        success, _, _ = self._run_command(
-            "sudo ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 "
-            "-o PasswordAuthentication=no -o BatchMode=yes "
-            "root@localhost echo ok 2>/dev/null"
-        )
-        if success:
-            self._log("root SSH 免密碼已可用，無需重新設定")
-            return True
+        # 取得系統 hostname（Ansible 實際連線的目標）
+        _, hostname, _ = self._run_command("hostname")
+        hostname = hostname.strip() if hostname.strip() else "localhost"
 
-        # 2. SSH 不可用 ── 建立 /root/.ssh 並修復權限
-        self._log("SSH 不可用，重新設定 root SSH key...")
+        # 1. 建立目錄並修復權限
         self._run_command("sudo mkdir -p /root/.ssh && sudo chmod 700 /root/.ssh")
 
-        # 3. 若 id_rsa 不存在才生成新的（避免覆蓋已有的 key）
-        exists, _, _ = self._run_command("sudo test -f /root/.ssh/id_rsa && echo yes || echo no")
+        # 2. 若 ed25519 key 不存在則生成
+        key_path = "/root/.ssh/id_ed25519"
+        exists, _, _ = self._run_command(
+            f"sudo test -f {key_path} && echo yes || echo no"
+        )
         if "yes" not in exists:
-            self._log("產生新的 root SSH key pair...")
+            self._log("產生新的 root SSH key pair (ed25519)...")
             gen_ok, _, gen_err = self._run_command(
-                "sudo ssh-keygen -t rsa -f /root/.ssh/id_rsa -N '' -q"
+                f"sudo ssh-keygen -t ed25519 -f {key_path} -N '' -q"
             )
             if not gen_ok:
-                self._log(f"ssh-keygen 失敗: {gen_err}", "ERROR")
+                self._log(f"ssh-keygen (ed25519) 失敗: {gen_err}", "ERROR")
                 return False
 
-        # 4. 確保 public key 在 authorized_keys 中
+        # 3. 清空並重建 authorized_keys（僅包含當前的 ed25519 public key）
         self._run_command(
-            "sudo sh -c 'cat /root/.ssh/id_rsa.pub >> /root/.ssh/authorized_keys' && "
-            "sudo sort -u /root/.ssh/authorized_keys -o /root/.ssh/authorized_keys && "
-            "sudo chmod 600 /root/.ssh/authorized_keys"
+            f"sudo sh -c 'cat {key_path}.pub > /root/.ssh/authorized_keys' && "
+            "sudo chmod 600 /root/.ssh/authorized_keys && "
+            f"sudo chmod 644 {key_path}.pub"
         )
 
-        # 5. 再次測試連線
+        # 4. 清除 known_hosts 中本機相關的舊 host key
+        #    mirror-registry Ansible 會重新信任 host key
+        for target in [hostname, "localhost", "127.0.0.1"]:
+            self._run_command(
+                f"sudo ssh-keygen -R {target} -f /root/.ssh/known_hosts 2>/dev/null || true"
+            )
+
+        # 5. 驗證 hostname SSH 連線（ed25519 無需特殊算法選項）
+        ssh_opts = (
+            "-o StrictHostKeyChecking=no "
+            "-o ConnectTimeout=5 "
+            "-o PasswordAuthentication=no "
+            "-o BatchMode=yes"
+        )
+
         success, _, err = self._run_command(
-            "sudo ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 "
-            "-o PasswordAuthentication=no -o BatchMode=yes "
-            "root@localhost echo ok"
+            f"sudo ssh {ssh_opts} root@{hostname} echo ok"
         )
         if success:
-            self._log("root SSH 設定成功")
+            self._log(f"root SSH 設定成功 (已驗證 root@{hostname})")
             return True
 
-        self._log(f"root SSH 設定後仍無法連線: {err}", "ERROR")
+        # fallback: 測試 localhost
+        self._log(f"root@{hostname} 連線失敗，嘗試 localhost...", "WARNING")
+        success, _, err = self._run_command(
+            f"sudo ssh {ssh_opts} root@localhost echo ok"
+        )
+        if success:
+            self._log("root SSH 設定成功 (已驗證 root@localhost)")
+            return True
+
+        self._log(f"root SSH 所有路徑測試失敗: {err[:200]}", "ERROR")
         return False
 
     # ------------------------------------------------------------------
