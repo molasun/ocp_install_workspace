@@ -317,52 +317,52 @@ class MirrorRegistryManager(BaseManager):
     # ------------------------------------------------------------------
 
     def _setup_root_ssh(self) -> bool:
-        """確保 root 免密碼 SSH 到自身
+        """確保 mirror-registry 的 SSH 連線環境就緒
 
-        mirror-registry 的 Ansible execution environment 容器硬編碼使用
-        /root/.ssh/id_rsa 作為 SSH 私鑰，因此必須生成 RSA 金鑰（非 ed25519）。
-        這是 Red Hat mirror-registry 工具的約束，不可更改金鑰類型。
+        mirror-registry 使用自己生成的 /root/.ssh/quay_installer 金鑰，
+        透過 podman -v 掛載到容器內作為 --private-key 使用。
+        本方法不生成任何金鑰，只確保：
+          1. /root/.ssh 目錄存在且權限正確
+          2. 若 quay_installer 已存在，其 public key 在 authorized_keys 中
+          3. 若 quay_installer 不存在（首次安裝），mirror-registry 會自行生成
         """
-        self._log("設定 root SSH 免密碼 (id_rsa)...")
+        self._log("檢查 mirror-registry SSH 環境...")
 
-        key_path = "/root/.ssh/id_rsa"
-
-        # 1. 建立目錄並修復權限
+        # 1. 確保 /root/.ssh 目錄存在且權限正確
         self._run_command("sudo mkdir -p /root/.ssh && sudo chmod 700 /root/.ssh")
 
-        # 2. 若 id_rsa 不存在則生成（mirror-registry 要求 id_rsa）
+        quay_key = "/root/.ssh/quay_installer"
+
+        # 2. 檢查 quay_installer 是否存在
         _, stdout, _ = self._run_command(
-            f"sudo test -f {key_path} && echo yes || echo no"
+            f"sudo test -f {quay_key} && echo yes || echo no"
         )
         if "yes" not in stdout:
-            self._log("產生新的 root SSH key pair (RSA)...")
-            gen_ok, _, gen_err = self._run_command(
-                f"sudo ssh-keygen -t rsa -f {key_path} -N '' -q"
+            self._log(
+                "quay_installer 金鑰不存在，mirror-registry 將在安裝時自動生成"
             )
-            if not gen_ok:
-                self._log(f"ssh-keygen 失敗: {gen_err}", "ERROR")
-                return False
+            return True
 
-        # 3. 將 public key 追加到 authorized_keys（不覆蓋既有條目）
-        #    保留 mirror-registry 可能已加入的 quay_installer 等其他 key
+        # 3. quay_installer 已存在 — 確保其 public key 在 authorized_keys 中
+        self._log("quay_installer 金鑰已存在，確保 public key 在 authorized_keys 中")
         self._run_command(
-            f"sudo sh -c 'cat {key_path}.pub >> /root/.ssh/authorized_keys' && "
+            f"sudo sh -c 'cat {quay_key}.pub >> /root/.ssh/authorized_keys' && "
             "sudo sort -u /root/.ssh/authorized_keys -o /root/.ssh/authorized_keys && "
-            "sudo chmod 600 /root/.ssh/authorized_keys && "
-            f"sudo chmod 644 {key_path}.pub"
+            "sudo chmod 600 /root/.ssh/authorized_keys"
         )
 
-        # 4. 驗證 SSH 連線（與 mirror-registry 相同的方式：localhost）
+        # 4. 驗證 SSH 連線（使用 quay_installer，與 mirror-registry 相同）
         success, _, err = self._run_command(
-            "sudo ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 "
+            f"sudo ssh -i {quay_key} "
+            "-o StrictHostKeyChecking=no -o ConnectTimeout=5 "
             "root@localhost echo ok"
         )
         if success:
-            self._log("root SSH 設定成功 (已驗證 root@localhost)")
+            self._log("mirror-registry SSH 環境就緒 (quay_installer)")
             return True
 
-        self._log(f"root SSH 設定失敗: {err[:200]}", "ERROR")
-        return False
+        self._log(f"SSH 驗證失敗: {err[:200]}", "WARNING")
+        return True  # 不阻斷流程，讓 mirror-registry 自行處理
 
     # ------------------------------------------------------------------
     # Step 4: 解壓安裝包
