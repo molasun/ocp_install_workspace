@@ -317,40 +317,34 @@ class MirrorRegistryManager(BaseManager):
     # ------------------------------------------------------------------
 
     def _setup_root_ssh(self) -> bool:
-        """確保 root 免密碼 SSH 到自身（透過系統 hostname）
+        """確保 root 免密碼 SSH 到自身
 
-        mirror-registry 的 Ansible playbook 連線到系統 hostname（非 localhost），
-        因此必須用系統 hostname 驗證。
-
-        使用 ed25519 金鑰（現代 OpenSSH 原生支援），避免 RSA 在 RHEL 9 /
-        容器化 Ansible runner 中的相容性問題。
+        mirror-registry 的 Ansible execution environment 容器硬編碼使用
+        /root/.ssh/id_rsa 作為 SSH 私鑰，因此必須生成 RSA 金鑰（非 ed25519）。
+        這是 Red Hat mirror-registry 工具的約束，不可更改金鑰類型。
         """
-        self._log("設定 root SSH 免密碼...")
+        self._log("設定 root SSH 免密碼 (id_rsa)...")
 
-        # 取得系統 hostname（Ansible 實際連線的目標）
-        _, hostname, _ = self._run_command("hostname")
-        hostname = hostname.strip() if hostname.strip() else "localhost"
+        key_path = "/root/.ssh/id_rsa"
 
         # 1. 建立目錄並修復權限
         self._run_command("sudo mkdir -p /root/.ssh && sudo chmod 700 /root/.ssh")
 
-        # 2. 若 ed25519 key 不存在則生成
-        key_path = "/root/.ssh/id_ed25519"
+        # 2. 若 id_rsa 不存在則生成（mirror-registry 要求 id_rsa）
         _, stdout, _ = self._run_command(
             f"sudo test -f {key_path} && echo yes || echo no"
         )
         if "yes" not in stdout:
-            self._log("產生新的 root SSH key pair (ed25519)...")
+            self._log("產生新的 root SSH key pair (RSA)...")
             gen_ok, _, gen_err = self._run_command(
-                f"sudo ssh-keygen -t ed25519 -f {key_path} -N '' -q"
+                f"sudo ssh-keygen -t rsa -f {key_path} -N '' -q"
             )
             if not gen_ok:
-                self._log(f"ssh-keygen (ed25519) 失敗: {gen_err}", "ERROR")
+                self._log(f"ssh-keygen 失敗: {gen_err}", "ERROR")
                 return False
 
         # 3. 將 public key 追加到 authorized_keys（不覆蓋既有條目）
-        #    mirror-registry 的 Ansible 使用它自己生成的 quay_installer key，
-        #    覆蓋 authorized_keys 會導致 Ansible SSH 認證失敗。
+        #    保留 mirror-registry 可能已加入的 quay_installer 等其他 key
         self._run_command(
             f"sudo sh -c 'cat {key_path}.pub >> /root/.ssh/authorized_keys' && "
             "sudo sort -u /root/.ssh/authorized_keys -o /root/.ssh/authorized_keys && "
@@ -358,37 +352,16 @@ class MirrorRegistryManager(BaseManager):
             f"sudo chmod 644 {key_path}.pub"
         )
 
-        # 4. 清除 known_hosts 中本機相關的舊 host key
-        for target in [hostname, "localhost", "127.0.0.1"]:
-            self._run_command(
-                f"sudo ssh-keygen -R {target} -f /root/.ssh/known_hosts 2>/dev/null || true"
-            )
-
-        # 5. 驗證 hostname SSH 連線（ed25519 無需特殊算法選項）
-        ssh_opts = (
-            "-o StrictHostKeyChecking=no "
-            "-o ConnectTimeout=5 "
-            "-o PasswordAuthentication=no "
-            "-o BatchMode=yes"
-        )
-
+        # 4. 驗證 SSH 連線（與 mirror-registry 相同的方式：localhost）
         success, _, err = self._run_command(
-            f"sudo ssh {ssh_opts} root@{hostname} echo ok"
-        )
-        if success:
-            self._log(f"root SSH 設定成功 (已驗證 root@{hostname})")
-            return True
-
-        # fallback: 測試 localhost
-        self._log(f"root@{hostname} 連線失敗，嘗試 localhost...", "WARNING")
-        success, _, err = self._run_command(
-            f"sudo ssh {ssh_opts} root@localhost echo ok"
+            "sudo ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 "
+            "root@localhost echo ok"
         )
         if success:
             self._log("root SSH 設定成功 (已驗證 root@localhost)")
             return True
 
-        self._log(f"root SSH 所有路徑測試失敗: {err[:200]}", "ERROR")
+        self._log(f"root SSH 設定失敗: {err[:200]}", "ERROR")
         return False
 
     # ------------------------------------------------------------------
