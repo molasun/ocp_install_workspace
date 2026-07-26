@@ -348,15 +348,17 @@ class MirrorRegistryManager(BaseManager):
                 self._log(f"ssh-keygen (ed25519) 失敗: {gen_err}", "ERROR")
                 return False
 
-        # 3. 清空並重建 authorized_keys（僅包含當前的 ed25519 public key）
+        # 3. 將 public key 追加到 authorized_keys（不覆蓋既有條目）
+        #    mirror-registry 的 Ansible 使用它自己生成的 quay_installer key，
+        #    覆蓋 authorized_keys 會導致 Ansible SSH 認證失敗。
         self._run_command(
-            f"sudo sh -c 'cat {key_path}.pub > /root/.ssh/authorized_keys' && "
+            f"sudo sh -c 'cat {key_path}.pub >> /root/.ssh/authorized_keys' && "
+            "sudo sort -u /root/.ssh/authorized_keys -o /root/.ssh/authorized_keys && "
             "sudo chmod 600 /root/.ssh/authorized_keys && "
             f"sudo chmod 644 {key_path}.pub"
         )
 
         # 4. 清除 known_hosts 中本機相關的舊 host key
-        #    mirror-registry Ansible 會重新信任 host key
         for target in [hostname, "localhost", "127.0.0.1"]:
             self._run_command(
                 f"sudo ssh-keygen -R {target} -f /root/.ssh/known_hosts 2>/dev/null || true"
