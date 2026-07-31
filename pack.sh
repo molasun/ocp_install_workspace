@@ -58,7 +58,7 @@ find "${TEMP_DIR}/${INSTALL_BASTION}" -type d -name __pycache__ -exec rm -rf {} 
 find "${TEMP_DIR}/${INSTALL_BASTION}" -type f -name '*.pyc' -delete 2>/dev/null || true
 
 echo "[2/3] Copying ${INSTALL_SOURCE} (excluding mirror/mirror-cache)..."
-rsync -a --exclude 'mirror-cache/' "${INSTALL_SOURCE}/" "${TEMP_DIR}/install_source/"
+rsync -a --exclude 'mirror-cache/' --exclude 'mirror/' "${INSTALL_SOURCE}/" "${TEMP_DIR}/install_source/"
 
 echo "[3/3] Creating tar..."
 tar -czf "${OUTPUT_FILE}" -C "${TEMP_DIR}" install_bastion install_source

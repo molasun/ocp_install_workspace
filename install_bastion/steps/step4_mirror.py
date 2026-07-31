@@ -11,98 +11,127 @@ from managers.agent_create_manager import AgentCreateManager
 
 def _check_registry_catalog(config_params: dict) -> dict:
     """
-    三層級檢查 Registry 鏡像推送狀態
+    檢查 Mirror Registry 中 OCP 鏡像同步狀態
 
-    Level 1: Catalog — repo 是否存在（最快）
-    Level 2: Tags — tag 數量 >= 3（有實際鏡像）
-    Level 3: Release — release image manifest 是否存在（最可信）
+    檢查兩個 repo 是否存在且包含 tags:
+      - {reponame}/openshift/release
+      - {reponame}/openshift/release-images
+
+    連線統一使用 bastion FQDN（與 mirror_registry_manager.verify_connection 一致）。
+    Quay /v2/_catalog 和 /v2/{repo}/tags/list 需要 Bearer token，先透過 /v2/auth 獲取。
 
     Returns:
-        dict: verified / passed / failed / tag_count / reponame / release_tag / checked_at
+        dict: verified / passed / failed / repos / reponame / target_repos / checked_at
     """
-    bastion_ip = config_params.get('bastion', {}).get('ip', '')
+    bastion_name = config_params.get('bastion', {}).get('name', 'bastion')
+    cluster_name = config_params.get('clusterName', 'ocp4')
+    base_domain = config_params.get('baseDomain', 'example.com')
+    bastion_fqdn = f"{bastion_name}.{cluster_name}.{base_domain}"
     registry_password = config_params.get('registryPassword', '')
     reponame = st.session_state.get('file_paths', {}).get('reponame', 'ocp420')
 
-    # 推導 release tag：ocp_release-arch (e.g. 4.20.8-x86_64)
-    version_info = config_params.get('versionInfo', {})
-    ocp_release = version_info.get('ocpRelease', '4.20.8')
-    arch = version_info.get('architecture', 'amd64')
-    arch_map = {'amd64': 'x86_64', 'arm64': 'aarch64'}
-    release_tag = f"{ocp_release}-{arch_map.get(arch, arch)}"
+    target_repos = [
+        f"{reponame}/openshift/release",
+        f"{reponame}/openshift/release-images",
+    ]
 
     result = {
         'verified': False,
         'passed': [],
         'failed': [],
-        'tag_count': 0,
+        'repos': {},
         'reponame': reponame,
-        'release_tag': release_tag,
+        'target_repos': target_repos,
         'checked_at': datetime.now().strftime('%H:%M:%S'),
     }
 
-    if not bastion_ip or not registry_password:
-        result['failed'].append('connection')
+    # 標記全部失敗的輔助函數
+    def _mark_all_failed():
+        for repo in target_repos:
+            result['repos'][repo] = {'exists': False, 'tag_count': 0}
+            result['failed'].append(repo)
+
+    if not bastion_fqdn or not registry_password:
+        _mark_all_failed()
         return result
 
     auth = f"init:{registry_password}"
-    base_url = f"https://{bastion_ip}:8443/v2"
+    base_url = f"https://{bastion_fqdn}:8443/v2"
 
-    # Level 1: Catalog 檢查
+    # Step 0: 獲取 Bearer token（Quay /v2/ 端點需要）
+    token = ""
     try:
-        r = subprocess.run(
-            f"curl -sk -u {auth} {base_url}/_catalog",
-            shell=True, capture_output=True, text=True, timeout=10
+        auth_url = (
+            f"{base_url}/auth"
+            f"?service={bastion_fqdn}:8443"
+            f"&scope=repository:{reponame}:pull"
         )
-        if r.returncode == 0 and reponame in r.stdout:
-            result['passed'].append('catalog')
-        else:
-            result['failed'].append('catalog')
-            return result  # Level 1 未通過，後面不查
-    except Exception:
-        result['failed'].append('catalog')
-        return result
-
-    # Level 2: Tags 數量檢查
-    try:
         r = subprocess.run(
-            f"curl -sk -u {auth} {base_url}/{reponame}/tags/list",
+            f"curl -sk -u {auth} \"{auth_url}\"",
             shell=True, capture_output=True, text=True, timeout=10
         )
         if r.returncode == 0:
             data = json.loads(r.stdout)
-            tags = data.get('tags', [])
-            result['tag_count'] = len(tags)
-            if len(tags) >= 3:
-                result['passed'].append('tags')
-            else:
-                result['failed'].append('tags')
-        else:
-            result['failed'].append('tags')
+            token = data.get('token', '')
     except Exception:
-        result['failed'].append('tags')
+        pass
 
-    # Level 3: Release Image 確認
+    if not token:
+        _mark_all_failed()
+        return result
+
+    auth_header = f"Authorization: Bearer {token}"
+
+    # Step 1: Catalog — 確認兩個 repo 都存在
+    catalog_repos = []
     try:
         r = subprocess.run(
-            f"curl -sk -o /dev/null -w '%{{http_code}}' -u {auth} -I {base_url}/{reponame}/manifests/{release_tag}",
+            f"curl -sk -H '{auth_header}' {base_url}/_catalog",
             shell=True, capture_output=True, text=True, timeout=10
         )
-        if r.returncode == 0 and '200' in r.stdout:
-            result['passed'].append('release')
-        else:
-            result['failed'].append('release')
+        if r.returncode == 0:
+            data = json.loads(r.stdout)
+            catalog_repos = data.get('repositories', [])
     except Exception:
-        result['failed'].append('release')
+        _mark_all_failed()
+        return result
 
-    # Level 1 + Level 2 通過即視為驗證通過
-    result['verified'] = 'catalog' in result['passed'] and 'tags' in result['passed']
+    # Step 2: 對每個 repo 檢查 tags
+    for repo in target_repos:
+        repo_exists = repo in catalog_repos
+        tag_count = 0
+
+        if repo_exists:
+            try:
+                r = subprocess.run(
+                    f"curl -sk -H '{auth_header}' {base_url}/{repo}/tags/list",
+                    shell=True, capture_output=True, text=True, timeout=10
+                )
+                if r.returncode == 0:
+                    data = json.loads(r.stdout)
+                    tags = data.get('tags', [])
+                    tag_count = len(tags) if tags else 0
+            except Exception:
+                pass
+
+        result['repos'][repo] = {
+            'exists': repo_exists,
+            'tag_count': tag_count,
+        }
+
+        if repo_exists and tag_count > 0:
+            result['passed'].append(repo)
+        else:
+            result['failed'].append(repo)
+
+    # verified = 兩個 repo 都通過
+    result['verified'] = len(result['passed']) == len(target_repos)
 
     return result
 
 
 def _render_sync_check_section(config_params: dict):
-    """渲染同步狀態檢查區塊（三層級檢查 + 結果快取）"""
+    """渲染同步狀態檢查區塊（雙 repo 檢查 + 結果快取）"""
     st.subheader(t('step4.check_status'))
     st.markdown(t('step4.check_desc'))
 
@@ -116,23 +145,25 @@ def _render_sync_check_section(config_params: dict):
     if sync_result:
         st.caption(f"🕐 {sync_result.get('checked_at', '')}")
 
-        levels = [
-            ('catalog', t('step4.check_level_catalog')),
-            ('tags', t('step4.check_level_tags', count=sync_result.get('tag_count', 0))),
-            ('release', t('step4.check_level_release', tag=sync_result.get('release_tag', ''))),
-        ]
+        repos = sync_result.get('repos', {})
+        passed = sync_result.get('passed', [])
+        failed = sync_result.get('failed', [])
 
-        for level_key, level_label in levels:
-            if level_key in sync_result['passed']:
-                st.markdown(f"✅ {level_label}")
-            else:
-                st.markdown(f"❌ {level_label}")
+        for repo, info in repos.items():
+            exists = info.get('exists', False)
+            tag_count = info.get('tag_count', 0)
+            status = '✅' if repo in passed else '❌'
+            st.markdown(
+                f"{status} `{repo}` — "
+                f"{'存在' if exists else '不存在'}, "
+                f"tags: {tag_count}"
+            )
 
         if sync_result['verified']:
             st.success(t('step4.sync_verified'))
         else:
-            passed_str = ', '.join(sync_result.get('passed', []))
-            failed_str = ', '.join(sync_result.get('failed', []))
+            passed_str = ', '.join(passed)
+            failed_str = ', '.join(failed)
             st.warning(t('step4.sync_partial', passed=passed_str, failed=failed_str))
 
     st.markdown("---")
@@ -244,7 +275,6 @@ def render_step4_mirror():
     # === 2. 檔案檢查 ===
     st.subheader(t('step4.file_check'))
 
-    bastion_ip = config_params.get('bastion', {}).get('ip', '')
     bastion_name = config_params.get('bastion', {}).get('name', 'bastion')
     cluster_name = config_params.get('clusterName', 'ocp4')
     base_domain = config_params.get('baseDomain', 'example.com')
@@ -281,7 +311,7 @@ def render_step4_mirror():
     st.markdown(t('step4.sync_desc'))
 
     cache_dir = os.path.join(install_source_dir, "mirror-cache")
-    registry_target = f"{bastion_ip}:8443" if bastion_ip else f"{bastion_fqdn}:8443"
+    registry_target = f"{bastion_fqdn}:8443"
 
     cmd = (
         f"mkdir -p {cache_dir}\n"

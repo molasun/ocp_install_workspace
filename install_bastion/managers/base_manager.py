@@ -32,7 +32,7 @@ class BaseManager:
         """
         # 方法1: 透過 SUDO_USER 環境變數
         sudo_user = os.environ.get('SUDO_USER', '')
-        if sudo_user:
+        if sudo_user and sudo_user != 'root':
             return os.path.join('/home', sudo_user)
         
         # 方法2: 如果目前使用者不是 root，直接使用 ~
