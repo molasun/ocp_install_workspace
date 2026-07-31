@@ -46,8 +46,11 @@ pip install streamlit pyyaml
 
 ### 3.4 產生離線安裝所需檔案
 
-#### 步驟 1：執行 Streamlit 應用程式產生設定檔
+#### 步驟 1：執行 prep_app.py 產生設定檔
+> **⚠️ 必須在 `install_tool` 目錄下執行**，否則無法正確產出路徑與設定檔。
+
 ```bash
+cd install_tool
 streamlit run prep_app.py
 ```
 - 產出檔案：
@@ -69,6 +72,43 @@ cd ..
 ./pack.sh
 ```
 - 輸出：`ocp_install_offline.tar.gz`
+- 包含：`install_bastion/` 全部、`install_source/`（排除 `mirror/`、`mirror-cache/`）
+- **`mirror/` 因體積過大不納入打包**，需手動搬移到離線環境（見 3.6）
+
+### 3.6 離線部署必備檔案檢查清單
+
+> 以下檔案需**手動複製**到離線主機。
+
+| # | 檔案 / 目錄 | 說明 | 傳輸方式 |
+|---|------------|------|---------|
+| 1 | `ocp_install_offline.tar.gz` | 部署主程式包（pack.sh 產出） | USB / 網路 |
+| 2 | `install_tool/install_source/mirror/` | **鏡像同步目錄**（* 整包複製） | USB / 網路 |
+
+`mirror/` 目錄內容包含：
+
+```
+install_tool/install_source/mirror/
+  ├── imageset-config.yaml     # oc-mirror 設定檔
+  └── ...                      # mirror 檔案
+```
+
+**離線主機上的預期目錄結構：**
+
+```
+~/
+├── install_bastion/           # 來自 ocp_install_offline.tar.gz
+│   ├── install_on_host.sh
+│   ├── packages/
+│   └── ...
+├── install_source/            # 來自 ocp_install_offline.tar.gz
+│   ├── mirror/                # ← 手動複製！
+│   │   ├── imageset-config.yaml
+│   │   └── *.tar.gz
+│   └── ocp/
+│       ├── install-config.yaml
+│       └── agent-config.yaml
+└── ocp_install_offline.tar.gz
+```
 
 ---
 
@@ -124,7 +164,7 @@ cd ~/install_bastion
 
 ### 6.2 `pack.sh`
 - 用途：將 `install_bastion` 與 `install_source` 打包為 `ocp_install_offline.tar.gz`
-- 排除：`install_source/mirror/mirror-cache/`
+- 排除：`mirror/` `mirror-cache/`
 - 前置條件：需先執行 `build_offline_packages.sh` 產生離線套件
 
 ### 6.3 `install_on_host.sh`
@@ -139,9 +179,11 @@ cd ~/install_bastion
 
 ## 7. 注意事項
 
-1. 離線環境的套件 **必須同為 RHEL 9**，以確保套件相容性。
-2. 若 `.venv` 目錄因先前執行 `sudo` 而權限錯亂，腳本會自動以 `sudo rm -rf` 清理。
-3. 若需變更 Streamlit Port，請修改 `install_on_host.sh` 中的 `--server.port` 參數。
-4. 若有防火牆，請開放 8501 Port 或調整 SELinux 規則。
+1. **`prep_app.py` 必須在 `install_tool` 目錄下執行**，否則設定檔路徑會錯誤。
+2. **`mirror/` 目錄必須手動複製到離線主機**（`pack.sh` 因體積過大將其排除，見 3.6 檢查清單）。
+3. 離線環境的套件 **必須同為 RHEL 9**，以確保套件相容性。
+4. 若 `.venv` 目錄因先前執行 `sudo` 而權限錯亂，腳本會自動以 `sudo rm -rf` 清理。
+5. 若需變更 Streamlit Port，請修改 `install_on_host.sh` 中的 `--server.port` 參數。
+6. 若有防火牆，請開放 8501 Port 或調整 SELinux 規則。
 
 ---

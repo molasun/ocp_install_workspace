@@ -59,10 +59,30 @@ if command -v uv &> /dev/null; then
     uv venv .venv --python 3.12 2>/dev/null || uv venv .venv
 else
     echo "      Using python3 -m venv (uv not found)"
-    python3 -m venv .venv
+    # vanilla RHEL 9 可能沒有 python3-pip RPM，導致 venv 內沒有 pip。
+    # 不帶 pip 建立 venv，後續用 bundled get-pip.py 引導。
+    python3 -m venv --without-pip .venv
 fi
 
 echo ""
+
+# === Step 2.5: Bootstrap pip into venv (if needed) ===
+if ! command -v uv &> /dev/null; then
+    echo "[2.5/4] Bootstrapping pip into venv..."
+    if [ -f ".venv/bin/pip" ]; then
+        echo "      pip already available"
+    else
+        # get-pip.py + bundled pip/setuptools/wheel wheels（離線安裝 pip）
+        .venv/bin/python packages/get-pip.py --no-index --find-links ./packages
+        if [ -f ".venv/bin/pip" ]; then
+            echo "      pip bootstrapped successfully"
+        else
+            echo "ERROR: Failed to bootstrap pip into venv"
+            exit 1
+        fi
+    fi
+    echo ""
+fi
 
 # === Step 3: Offline install ===
 echo "[3/4] Installing packages..."
