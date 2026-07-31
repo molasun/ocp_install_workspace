@@ -59,7 +59,13 @@ FILE_COUNT=$(ls -1 "${PACKAGES_DIR}"/*.whl 2>/dev/null | wc -l)
 TOTAL_SIZE=$(du -sh "${PACKAGES_DIR}" 2>/dev/null | cut -f1)
 
 echo ""
-echo "[3/3] Done — ${FILE_COUNT} wheels, ${TOTAL_SIZE}"
+echo "[3/3] Downloading pip / setuptools / wheel (for offline venv bootstrap)..."
+# vanilla RHEL 9 不包含 python3-pip RPM，離線 venv 內沒有 pip。
+# 下載 pip/setuptools/wheel wheel + get-pip.py，供 install_on_host.sh 引導 pip。
+pip download pip setuptools wheel -d "${PACKAGES_DIR}"
+curl -sS https://bootstrap.pypa.io/get-pip.py -o "${PACKAGES_DIR}/get-pip.py"
+
+echo "[4/4] Done — ${FILE_COUNT} wheels, ${TOTAL_SIZE}"
 echo ""
 
 echo "========================================"

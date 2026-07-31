@@ -19,7 +19,6 @@ class DNSManager(BaseManager):
         infra_nodes = config.get('infra', [])
         cluster_name = config.get('clusterName', 'ocp4')
         base_domain = config.get('baseDomain', 'example.com')
-        dns_upstream = config.get('dns_upstream', '8.8.8.8')
         
         bastion_ip = bastion.get('ip', '')
         bastion_name = bastion.get('name', 'bastion')
@@ -27,7 +26,6 @@ class DNSManager(BaseManager):
         bootstrap_name = bootstrap.get('name', 'bootstrap')
         
         dns_config = f"""domain={cluster_name}.{base_domain},{bastion_ip}/24,local
-server={dns_upstream}
 
 host-record={bastion_name}.{cluster_name}.{base_domain},{bastion_ip}
 host-record={bootstrap_name}.{cluster_name}.{base_domain},{bootstrap_ip}
