@@ -18,7 +18,12 @@ def _check_registry_catalog(config_params: dict) -> dict:
       - {reponame}/openshift/release-images
 
     連線統一使用 bastion FQDN（與 mirror_registry_manager.verify_connection 一致）。
-    Quay /v2/_catalog 和 /v2/{repo}/tags/list 需要 Bearer token，先透過 /v2/auth 獲取。
+    3 次 curl 完成：
+      1. 獲取 Bearer token（含兩個 repo scope）
+      2. 查 release tags/list
+      3. 查 release-images tags/list
+
+    tags/list 的 HTTP 200 即證明 repo 存在，不需要額外查 catalog。
 
     Returns:
         dict: verified / passed / failed / repos / reponame / target_repos / checked_at
@@ -45,74 +50,53 @@ def _check_registry_catalog(config_params: dict) -> dict:
         'checked_at': datetime.now().strftime('%H:%M:%S'),
     }
 
-    # 標記全部失敗的輔助函數
-    def _mark_all_failed():
+    if not bastion_fqdn or not registry_password:
         for repo in target_repos:
             result['repos'][repo] = {'exists': False, 'tag_count': 0}
-            result['failed'].append(repo)
-
-    if not bastion_fqdn or not registry_password:
-        _mark_all_failed()
+        result['failed'] = list(target_repos)
         return result
 
     auth = f"init:{registry_password}"
     base_url = f"https://{bastion_fqdn}:8443/v2"
 
-    # Step 0: 獲取 Bearer token（Quay /v2/ 端點需要）
+    # ── 獲取 Bearer token（一次含兩個 scope） ──
+    scopes = '&'.join(f"scope=repository:{repo}:pull" for repo in target_repos)
+    auth_url = f"{base_url}/auth?service={bastion_fqdn}:8443&{scopes}"
     token = ""
     try:
-        auth_url = (
-            f"{base_url}/auth"
-            f"?service={bastion_fqdn}:8443"
-            f"&scope=repository:{reponame}:pull"
-        )
         r = subprocess.run(
             f"curl -sk -u {auth} \"{auth_url}\"",
             shell=True, capture_output=True, text=True, timeout=10
         )
         if r.returncode == 0:
-            data = json.loads(r.stdout)
-            token = data.get('token', '')
+            token = json.loads(r.stdout).get('token', '')
     except Exception:
         pass
 
     if not token:
-        _mark_all_failed()
+        for repo in target_repos:
+            result['repos'][repo] = {'exists': False, 'tag_count': 0}
+        result['failed'] = list(target_repos)
         return result
 
     auth_header = f"Authorization: Bearer {token}"
 
-    # Step 1: Catalog — 確認兩個 repo 都存在
-    catalog_repos = []
-    try:
-        r = subprocess.run(
-            f"curl -sk -H '{auth_header}' {base_url}/_catalog",
-            shell=True, capture_output=True, text=True, timeout=10
-        )
-        if r.returncode == 0:
-            data = json.loads(r.stdout)
-            catalog_repos = data.get('repositories', [])
-    except Exception:
-        _mark_all_failed()
-        return result
-
-    # Step 2: 對每個 repo 檢查 tags
+    # ── 對每個 repo 查 tags/list ──
     for repo in target_repos:
-        repo_exists = repo in catalog_repos
+        repo_exists = False
         tag_count = 0
-
-        if repo_exists:
-            try:
-                r = subprocess.run(
-                    f"curl -sk -H '{auth_header}' {base_url}/{repo}/tags/list",
-                    shell=True, capture_output=True, text=True, timeout=10
-                )
-                if r.returncode == 0:
-                    data = json.loads(r.stdout)
-                    tags = data.get('tags', [])
-                    tag_count = len(tags) if tags else 0
-            except Exception:
-                pass
+        try:
+            r = subprocess.run(
+                f"curl -sk -H '{auth_header}' {base_url}/{repo}/tags/list",
+                shell=True, capture_output=True, text=True, timeout=10
+            )
+            if r.returncode == 0:
+                data = json.loads(r.stdout)
+                repo_exists = True  # HTTP 200 → repo 存在
+                tags = data.get('tags', [])
+                tag_count = len(tags) if tags else 0
+        except Exception:
+            pass
 
         result['repos'][repo] = {
             'exists': repo_exists,
@@ -124,9 +108,7 @@ def _check_registry_catalog(config_params: dict) -> dict:
         else:
             result['failed'].append(repo)
 
-    # verified = 兩個 repo 都通過
     result['verified'] = len(result['passed']) == len(target_repos)
-
     return result
 
 
