@@ -29,7 +29,7 @@ INSTALL_BASTION="install_bastion"
 echo "========================================"
 echo "Pack offline deployment archive"
 echo "========================================"
-echo "Include: ${INSTALL_BASTION}/"
+echo "Include: ${INSTALL_BASTION}/ (with cluster_config.json from install_tool/config/)"
 echo "Include: ${INSTALL_SOURCE}/ (excluding mirror/mirror-cache)"
 echo "Output: ${OUTPUT_FILE}"
 echo ""
@@ -50,17 +50,27 @@ fi
 TEMP_DIR=$(mktemp -d)
 trap "rm -rf ${TEMP_DIR}" EXIT
 
-echo "[1/3] Copying ${INSTALL_BASTION}..."
+echo "[1/4] Copying ${INSTALL_BASTION}..."
 cp -r "${INSTALL_BASTION}" "${TEMP_DIR}/"
 
 # Clean dev artifacts
 find "${TEMP_DIR}/${INSTALL_BASTION}" -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 find "${TEMP_DIR}/${INSTALL_BASTION}" -type f -name '*.pyc' -delete 2>/dev/null || true
 
-echo "[2/3] Copying ${INSTALL_SOURCE} (excluding mirror/mirror-cache)..."
+echo "[2/4] Copying cluster_config.json..."
+# 將 install_tool 端產生的 cluster_config.json 帶入 install_bastion 的 config/
+if [ -f "install_tool/config/cluster_config.json" ]; then
+    mkdir -p "${TEMP_DIR}/${INSTALL_BASTION}/config"
+    cp install_tool/config/cluster_config.json "${TEMP_DIR}/${INSTALL_BASTION}/config/"
+    echo "      install_tool/config/cluster_config.json → install_bastion/config/"
+else
+    echo "      WARNING: install_tool/config/cluster_config.json not found"
+fi
+
+echo "[3/4] Copying ${INSTALL_SOURCE} (excluding mirror/mirror-cache)..."
 rsync -a --exclude 'mirror-cache/' --exclude 'mirror/' "${INSTALL_SOURCE}/" "${TEMP_DIR}/install_source/"
 
-echo "[3/3] Creating tar..."
+echo "[4/4] Creating tar..."
 tar -czf "${OUTPUT_FILE}" -C "${TEMP_DIR}" install_bastion install_source
 
 TAR_SIZE=$(du -h "${OUTPUT_FILE}" | cut -f1)
