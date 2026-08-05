@@ -25,6 +25,13 @@ class InstallManager(BaseManager):
         installed_packages = []
         
         for package in packages:
+            # 先用 rpm -q 檢查是否已安裝
+            check_ok, _, _ = self._run_command(f"rpm -q {package}")
+            if check_ok:
+                self._log(f"{package} 已安裝，跳過")
+                installed_packages.append(package)
+                continue
+
             self._log(f"安裝 {package}...")
             success, _, err = self._run_command(f"yum install -y {package}")
             if success:

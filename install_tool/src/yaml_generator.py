@@ -47,7 +47,6 @@ class YAMLGenerator:
         self.current_dir = current_dir
         self.config_dir = os.path.join(current_dir, 'config')
         self.v_info = config.get('version_info', {})
-        self.csi_info = config.get('csi_info', {})
         self.env = config.get('install_env', {})
 
     def _count_nodes(self, prefix):
@@ -199,10 +198,10 @@ class YAMLGenerator:
     def _load_additional_images(self) -> list:
         """
         載入 additional images
-        
+
         優先順序：
         1. additional_images.json（使用者自訂）
-        2. default_images.json 的 base_images + csi_images
+        2. default_images.json 的 base_images
         """
         # 嘗試讀取使用者自訂的 additional_images.json
         user_images = _load_json(os.path.join(self.config_dir, 'additional_images.json'))
@@ -210,30 +209,12 @@ class YAMLGenerator:
             # 確保只保留 name 欄位
             return [{"name": img["name"]} for img in user_images if img.get("name", "").strip()]
         
-        # Fallback: 從 default_images.json 建立
+        # Fallback: 從 default_images.json 獲取 base_images
         data = _load_json(os.path.join(self.config_dir, "default_images.json"))
         if not data:
             return []
         
-        # 合併 base_images 和 csi_images
-        images = []
-        seen = set()
-        
-        # 添加 base_images
-        for img in data.get('base_images', []):
-            name = img.get('name', '')
-            if name and name not in seen:
-                images.append({"name": name})
-                seen.add(name)
-        
-        # 添加 CSI images
-        for img in self._get_csi_images():
-            name = img.get('name', '')
-            if name and name not in seen:
-                images.append({"name": name})
-                seen.add(name)
-        
-        return images
+        return [{"name": img.get('name', '')} for img in data.get('base_images', []) if img.get('name', '')]
 
     def _build_operator_blocks(self, operators):
         """構建 operators 區塊（按 catalog 分組）"""
@@ -388,26 +369,3 @@ class YAMLGenerator:
                 "deviceName": device
             }
         }
-    
-    def _get_csi_images(self):
-        """從 default_images.json 獲取 CSI images"""
-        data = _load_json(os.path.join(self.config_dir, "default_images.json"))
-        if not data:
-            return []
-        
-        csi_type = self.csi_info.get('CSI_TYPE', 'none')
-        if csi_type == 'none':
-            return []
-        
-        csi_images = data.get('csi_images', {}).get(csi_type, [])
-        
-        if csi_type == 'trident':
-            ver = self.csi_info.get('TRIDENT_INSTALLER', '25.02.1')
-            major_minor = ver.rsplit('.', 1)[0] if '.' in ver else ver
-            return [
-                {"name": img['name'].replace('25.02.1', ver).replace('25.02', major_minor)}
-                for img in csi_images
-            ]
-        
-        # nfs-csi 或其他類型
-        return [{"name": img['name']} for img in csi_images]

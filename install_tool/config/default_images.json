@@ -42,56 +42,5 @@
         {
             "name": "quay.io/rhtw/gitops-envsub:latest"
         }
-    ],
-    "csi_images": {
-        "nfs-csi": [
-            {
-                "name": "registry.k8s.io/sig-storage/csi-resizer:v1.14.0"
-            },
-            {
-                "name": "registry.k8s.io/sig-storage/csi-provisioner:v5.3.0"
-            },
-            {
-                "name": "registry.k8s.io/sig-storage/csi-snapshotter:v8.3.0"
-            },
-            {
-                "name": "registry.k8s.io/sig-storage/livenessprobe:v2.17.0"
-            },
-            {
-                "name": "registry.k8s.io/sig-storage/nfsplugin:v4.12.1"
-            },
-            {
-                "name": "registry.k8s.io/sig-storage/snapshot-controller:v8.3.0"
-            },
-            {
-                "name": "registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.15.0"
-            }
-        ],
-        "trident": [
-            {
-                "name": "docker.io/netapp/trident:25.02.1"
-            },
-            {
-                "name": "docker.io/netapp/trident-autosupport:25.02"
-            },
-            {
-                "name": "registry.k8s.io/sig-storage/csi-provisioner:v5.2.0"
-            },
-            {
-                "name": "registry.k8s.io/sig-storage/csi-attacher:v4.8.0"
-            },
-            {
-                "name": "registry.k8s.io/sig-storage/csi-resizer:v1.13.1"
-            },
-            {
-                "name": "registry.k8s.io/sig-storage/csi-snapshotter:v8.2.0"
-            },
-            {
-                "name": "registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.13.0"
-            },
-            {
-                "name": "docker.io/netapp/trident-operator:25.02.1"
-            }
-        ]
-    }
+    ]
 }

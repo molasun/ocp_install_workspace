@@ -13,7 +13,7 @@ CURRENT_DIR = os.getcwd()
 CONFIG_DIR = os.path.join(CURRENT_DIR, 'config')
 
 def show_operators_page():
-    """渲染 Operator 選擇頁面，包含 CSI 配置、Package 勾選、版本查詢及 imageset 生成"""
+    """渲染 Operator 選擇頁面，包含 Package 勾選、版本查詢及 imageset 生成"""
     st.title(t('ops.title'))
     st.markdown(t('ops.subtitle'))
     
@@ -23,7 +23,6 @@ def show_operators_page():
     if operator_index is None:
         return
     
-    _render_csi_config()
     _render_package_selection(operator_index)
     _render_version_fetch(op_mgr, operator_index)
     _render_version_config()
@@ -32,9 +31,7 @@ def show_operators_page():
     _render_next_button()
 
 def _init_session_state():
-    """初始化 CSI 配置、已選 packages、版本資訊及 additional images 的 session state"""
-    if 'csi_config' not in st.session_state:
-        st.session_state.csi_config = {"CSI_TYPE": "nfs-csi", "TRIDENT_INSTALLER": "25.02.1"}
+    """初始化已選 packages、版本資訊及 additional images 的 session state"""
     # selected_packages: [{package_name, index_type}, ...]
     if 'selected_packages' not in st.session_state:
         st.session_state.selected_packages = []
@@ -56,50 +53,27 @@ def _load_operator_index():
     return data
 
 def _load_default_images():
-    """從 default_images.json 載入預設的 base 與 CSI images"""
+    """從 default_images.json 載入預設的 base images"""
     json_path = os.path.join(CONFIG_DIR, "default_images.json")
     if os.path.exists(json_path):
         try:
             with open(json_path, 'r') as f:
-                return json.load(f)
+                data = json.load(f)
+                return data.get('base_images', [])
         except Exception as e:
             st.warning(f"讀取 default_images.json 失敗: {e}")
-    return {"base_images": [], "csi_images": {}}
-
-def _get_default_csi_images(csi_config, default_images_data):
-    """根據 CSI 類型從 JSON 資料中提取對應的預設 images，trident 需動態替換版本號"""
-    csi_type = csi_config.get('CSI_TYPE', 'none')
-    csi_images_data = default_images_data.get('csi_images', {})
-    
-    if csi_type == 'trident':
-        trident_ver = csi_config.get('TRIDENT_INSTALLER', '25.02.1')
-        trident_major_minor = trident_ver.rsplit('.', 1)[0] if '.' in trident_ver else trident_ver
-        images = []
-        for img in csi_images_data.get('trident', []):
-            img_name = img['name'].replace('25.02.1', trident_ver).replace('25.02', trident_major_minor)
-            images.append({"name": img_name})
-        return images
-    
-    # nfs-csi 或其他類型：只保留 name
-    raw_images = csi_images_data.get(csi_type, [])
-    return [{"name": img['name']} for img in raw_images]
+    return []
 
 def _init_additional_images():
-    """合併 base images 與 CSI images 為 additional_images 的初始值"""
-    default_data = _load_default_images()
-    csi_config = st.session_state.get('csi_config', {'CSI_TYPE': 'none'})
+    """從 default_images.json 載入 base images 為 additional_images 的初始值"""
+    base = _load_default_images()
     
-    base = default_data.get('base_images', [])
-    csi = _get_default_csi_images(csi_config, default_data)
-    
-    # 初始化計數器（如果還沒有）
     if 'image_counter' not in st.session_state:
         st.session_state.image_counter = 0
     
     all_images = []
-    seen_names = set()  # 用於去重
+    seen_names = set()
     
-    # 處理 base images
     for img in base:
         img_name = img.get('name', '')
         if img_name and img_name not in seen_names:
@@ -110,33 +84,7 @@ def _init_additional_images():
             })
             seen_names.add(img_name)
     
-    # 處理 CSI images
-    for img in csi:
-        img_name = img.get('name', '')
-        if img_name and img_name not in seen_names:
-            st.session_state.image_counter += 1
-            all_images.append({
-                "name": img_name,
-                "id": f"img_{st.session_state.image_counter}"
-            })
-            seen_names.add(img_name)
-    
     st.session_state.additional_images = all_images
-
-def _render_csi_config():
-    """渲染 CSI 驅動類型選擇區塊，trident 模式額外顯示版本輸入框"""
-    with st.expander(t('ops.csi.title'), expanded=True):
-        csi_type = st.selectbox(
-            t('ops.csi.type'), ["nfs-csi", "trident", "none"],
-            index=0 if st.session_state.csi_config['CSI_TYPE'] == 'nfs-csi' else (
-                1 if st.session_state.csi_config['CSI_TYPE'] == 'trident' else 2)
-        )
-        st.session_state.csi_config['CSI_TYPE'] = csi_type
-        if csi_type == 'trident':
-            ver = st.text_input(t('ops.csi.trident_ver'), value=st.session_state.csi_config['TRIDENT_INSTALLER'])
-            st.session_state.csi_config['TRIDENT_INSTALLER'] = ver
-        else:
-            st.session_state.csi_config['TRIDENT_INSTALLER'] = ""
 
 def _get_selected_pkg_names():
     """取得已選 package 名稱列表"""
@@ -456,7 +404,6 @@ def _render_save_and_preview():
     # 生成 imageset-config.yaml
     try:
         cluster_config = ConfigManager('cluster_config.json').get_config()
-        cluster_config['csi_info'] = st.session_state.get('csi_config', {})
         yaml_content = YAMLGenerator(cluster_config, CURRENT_DIR).generate_imageset_config()
         
         # imageset-config.yaml → install_source/mirror/
