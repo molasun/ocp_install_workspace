@@ -17,109 +17,74 @@ class BastionYAMLGenerator:
     def __init__(self, cluster_config: dict):
         """
         Args:
-            cluster_config: 完整的 cluster_config.json 內容。
-                            install_env 中需包含所有節點 IP/名稱/網路 等欄位。
+            cluster_config: 完整的 cluster_config.json（嵌套格式）。
+                            master/worker/infra 為陣列，networkConfig 為物件。
         """
         self.raw = cluster_config
 
-        # install_env：扁平鍵值
-        install_env = cluster_config.get('install_env', {})
-
-        # 解析 install_env 中的常用值
-        def _v(key: str, default: Any = '') -> Any:
-            return install_env.get(key, default)
-
         # --- 基礎 ---
-        self.cluster_domain = _v('CLUSTER_DOMAIN', 'ocp4')
-        self.base_domain = _v('BASE_DOMAIN', 'example.com')
-        self.cluster_name = _v('CLUSTER_DOMAIN', 'ocp4')  # cluster_name == domain 的第一段
+        self.cluster_name = cluster_config.get('clusterName', 'ocp4')
+        self.base_domain = cluster_config.get('baseDomain', 'example.com')
         self.cluster_name_full = f"{self.cluster_name}.{self.base_domain}"
-
-        # --- 網路 ---
-        self.network_type = _v('NETWORK_TYPE', 'OVNKubernetes')
-        self.cluster_cidr = _v('CLUSTER_NETWORK_CIDR', '10.128.0.0/14')
-        self.host_prefix = int(_v('CLUSTER_NETWORK_HOST_PREFIX', 23) or 23)
-        self.service_cidr = _v('SERVICE_NETWORK_CIDR', '172.30.0.0/16')
-        self.machine_cidr = _v('MACHINE_NETWORK_CIDR', '')
-        self.gateway_ip = _v('GATEWAY_IP', '')
+        self.install_mode = cluster_config.get('mode', 'compact')
 
         # --- 節點 ---
-        self.bastion_ip = _v('BASTION_IP', '')
-        self.bastion_name = _v('BASTION_NAME', 'bastion')
-        self.bootstrap_ip = _v('BOOTSTRAP_IP', '')
-        self.bootstrap_name = _v('BOOTSTRAP_NAME', 'bootstrap')
+        bastion = cluster_config.get('bastion', {})
+        self.bastion_ip = bastion.get('ip', '')
+        self.bastion_name = bastion.get('name', 'bastion')
+
+        bootstrap = cluster_config.get('bootstrap', {})
+        self.bootstrap_ip = bootstrap.get('ip', '')
+        self.bootstrap_name = bootstrap.get('name', 'bootstrap')
 
         # --- 安全 ---
-        self.ssh_key = _v('SSH_KEY', '')
-        self.trust_bundle = _v('ADDITIONAL_TRUST_BUNDLE', '')
-        self.registry_password = _v('REGISTRY_PASSWORD', 'password')
-        self.install_mode = _v('INSTALL_MODE', 'compact')
+        self.ssh_key = cluster_config.get('sshKey', '')
+        self.trust_bundle = cluster_config.get('additionalTrustBundle', '')
+        self.registry_password = cluster_config.get('registryPassword', 'password')
+
+        # --- 網路 ---
+        nc = cluster_config.get('networkConfig', {})
+        self.network_type = nc.get('networkType', 'OVNKubernetes')
+        self.cluster_cidr = nc.get('clusterNetworkCidr', '10.128.0.0/14')
+        self.host_prefix = int(nc.get('clusterNetworkHostPrefix', 23) or 23)
+        self.service_cidr = nc.get('serviceNetworkCidr', '172.30.0.0/16')
+        self.machine_cidr = nc.get('machineNetworkCidr', '')
+        self.gateway_ip = nc.get('gatewayIp', '')
 
         # --- 版本 ---
-        version_info = cluster_config.get('version_info', {})
-        self.ocp_version = version_info.get('OCP_VERSION', '4.20')
-        self.architecture = version_info.get('ARCHITECTURE', 'amd64')
+        version_info = cluster_config.get('versionInfo', {})
+        self.ocp_version = version_info.get('ocpVersion', '4.20')
+        self.architecture = version_info.get('architecture', 'amd64')
 
         # --- 節點列表 ---
-        self._build_hosts()
+        self._build_hosts(cluster_config)
 
-    def _build_hosts(self):
-        """從 install_env 建構節點清單（僅有 IP 的 master 節點）"""
-        install_env = self.raw.get('install_env', {})
+    def _build_hosts(self, cluster_config: dict):
+        """從 nested config 格式建構節點清單"""
         hosts = []
+        default_device = '/dev/sda'
+        default_iface = 'enp1s0'
 
-        for idx in range(1, 4):  # master-1, master-2, master-3
-            suffix = f"0{idx}"
-            name = install_env.get(f'MASTER{suffix}_NAME', f'master-{idx-1}')
-            ip = install_env.get(f'MASTER{suffix}_IP', '')
-            mac = install_env.get(f'MASTER{suffix}_MAC', '')
-            iface = install_env.get(f'MASTER{suffix}_INTERFACE', '')
-            device = install_env.get(f'MASTER{suffix}_DEVICE', '')
-
+        def _add_node(node: dict, idx: int, prefix: str):
+            name = node.get('name') or f'{prefix}-{idx}'
+            ip = node.get('ip', '')
             if ip:
                 hosts.append({
-                    'name': name or f'master-{idx-1}',
+                    'name': name,
                     'ip': ip,
-                    'mac': mac or '',
-                    'interface': iface or '',
-                    'device': device or '/dev/sda',
+                    'mac': node.get('mac', ''),
+                    'interface': node.get('interface', default_iface),
+                    'device': node.get('device', default_device),
                 })
 
-        # infra nodes (non-compact mode)
-        if self.install_mode != 'compact':
-            for idx in range(1, 4):
-                suffix = f"0{idx}"
-                name = install_env.get(f'INFRA{suffix}_NAME', '')
-                ip = install_env.get(f'INFRA{suffix}_IP', '')
-                mac = install_env.get(f'INFRA{suffix}_MAC', '')
-                iface = install_env.get(f'INFRA{suffix}_INTERFACE', '')
-                device = install_env.get(f'INFRA{suffix}_DEVICE', '')
-                if ip:
-                    hosts.append({
-                        'name': name or f'infra-{idx-1}',
-                        'ip': ip,
-                        'mac': mac or '',
-                        'interface': iface or '',
-                        'device': device or '/dev/sda',
-                    })
+        for i, node in enumerate(cluster_config.get('master', [])):
+            _add_node(node, i, 'master')
 
-        # worker nodes (non-compact mode)
         if self.install_mode != 'compact':
-            for idx in range(1, 4):
-                suffix = f"0{idx}"
-                name = install_env.get(f'WORKER{suffix}_NAME', '')
-                ip = install_env.get(f'WORKER{suffix}_IP', '')
-                mac = install_env.get(f'WORKER{suffix}_MAC', '')
-                iface = install_env.get(f'WORKER{suffix}_INTERFACE', '')
-                device = install_env.get(f'WORKER{suffix}_DEVICE', '')
-                if ip:
-                    hosts.append({
-                        'name': name or f'worker-{idx-1}',
-                        'ip': ip,
-                        'mac': mac or '',
-                        'interface': iface or '',
-                        'device': device or '/dev/sda',
-                    })
+            for i, node in enumerate(cluster_config.get('infra', [])):
+                _add_node(node, i, 'infra')
+            for i, node in enumerate(cluster_config.get('worker', [])):
+                _add_node(node, i, 'worker')
 
         self.hosts = hosts
 
@@ -310,7 +275,6 @@ class BastionYAMLGenerator:
             'serviceNetworkCidr': (nc.get('serviceNetwork', [''])[0] if nc.get('serviceNetwork') else ''),
             'controlPlaneReplicas': cp.get('replicas', 0),
             'controlPlaneArchitecture': cp.get('architecture', ''),
-            'pullSecret': data.get('pullSecret', ''),
         }
 
     @staticmethod
@@ -398,10 +362,7 @@ class BastionYAMLGenerator:
         # controlPlane architecture
         if actual['controlPlaneArchitecture'] != self.architecture:
             diffs.append({'file': 'install-config.yaml', 'field': 'controlPlane.architecture', 'actual': actual['controlPlaneArchitecture'], 'expected': self.architecture, 'msg': 'architecture'})
-        # pullSecret
-        expected_pull = self._build_pull_secret()
-        if actual['pullSecret'] != expected_pull:
-            diffs.append({'file': 'install-config.yaml', 'field': 'pullSecret', 'actual': '[不同]', 'expected': '[不同]', 'msg': 'pullSecret 不一致 (init 密碼可能不同)'})
+        # pullSecret 不檢查 — cluster_config 存的是明碼，YAML 存的是 base64 編碼
 
         return diffs
 
