@@ -28,8 +28,10 @@ class DNSManager(BaseManager):
         dns_config = f"""domain={cluster_name}.{base_domain},{bastion_ip}/24,local
 
 host-record={bastion_name}.{cluster_name}.{base_domain},{bastion_ip}
-host-record={bootstrap_name}.{cluster_name}.{base_domain},{bootstrap_ip}
 """
+        # bootstrap IP 為空時跳過 DNS record
+        if bootstrap_ip:
+            dns_config += f"host-record={bootstrap_name}.{cluster_name}.{base_domain},{bootstrap_ip}\n"
         
         # Master 節點記錄
         for node in master_nodes:

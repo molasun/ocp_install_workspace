@@ -1,6 +1,8 @@
 import streamlit as st
 import time
+import os
 from i18n import t
+from managers.yaml_generator import BastionYAMLGenerator
 
 
 def render_step1_config():
@@ -243,7 +245,10 @@ def render_step1_config():
         )
     
     st.markdown("---")
-    
+
+    # === YAML 一致性檢查 ===
+    _render_yaml_consistency_check(config)
+
     # === 確認按鈕 ===
     col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 2])
     
@@ -280,3 +285,105 @@ def render_step1_config():
                 'registry_configure': True,
             }
             st.rerun()
+
+
+def _render_yaml_consistency_check(config: dict):
+    """檢查 install_source/ocp 下的 YAML 是否與 cluster_config.json 一致"""
+    st.subheader("📄 YAML 配置文件一致性檢查")
+
+    home_dir = os.path.expanduser("~")
+    ocp_dir = os.path.join(home_dir, "install_source", "ocp")
+    install_config_path = os.path.join(ocp_dir, "install-config.yaml")
+    agent_config_path = os.path.join(ocp_dir, "agent-config.yaml")
+
+    try:
+        generator = BastionYAMLGenerator(config)
+    except Exception as e:
+        st.error(f"無法初始化 YAML 生成器: {e}")
+        return
+
+    install_exists = os.path.exists(install_config_path)
+    agent_exists = os.path.exists(agent_config_path)
+
+    # YAML 都不存在 → 直接提供生成按鈕
+    if not install_exists and not agent_exists:
+        st.warning("YAML 文件尚不存在，請生成 `install-config.yaml` 和 `agent-config.yaml`")
+        _render_regenerate_button(config, generator, install_config_path, agent_config_path)
+        return
+
+    # 對比差異
+    all_diffs = []
+    if install_exists:
+        all_diffs.extend(generator.compare_install_config(install_config_path))
+    else:
+        all_diffs.append({'file': 'install-config.yaml', 'field': '-', 'actual': 'MISSING', 'expected': '-', 'msg': '檔案不存在'})
+
+    if agent_exists:
+        all_diffs.extend(generator.compare_agent_config(agent_config_path))
+    else:
+        all_diffs.append({'file': 'agent-config.yaml', 'field': '-', 'actual': 'MISSING', 'expected': '-', 'msg': '檔案不存在'})
+
+    if not all_diffs:
+        st.success("✅ YAML 文件與 `cluster_config.json` 完全一致")
+        return
+
+    # 有差異 — 展示差異表 + 重新生成按鈕
+    st.warning(f"⚠️ 發現 {len(all_diffs)} 處不一致")
+
+    # 按 file 分組展示
+    for file_name in ['install-config.yaml', 'agent-config.yaml']:
+        file_diffs = [d for d in all_diffs if d.get('file') == file_name]
+        if not file_diffs:
+            continue
+        with st.expander(f"{file_name} ({len(file_diffs)} 處差異)", expanded=True):
+            for d in file_diffs:
+                st.markdown(
+                    f"- ❌ **{d['msg']}**  \n"
+                    f"  - 當前值: `{d['actual']}`  \n"
+                    f"  - 預期值: `{d['expected']}`"
+                )
+
+    _render_regenerate_button(config, generator, install_config_path, agent_config_path)
+
+
+def _render_regenerate_button(config, generator, install_config_path, agent_config_path):
+    """渲染重新生成 YAML 的按鈕與 preview"""
+    if st.button("🔄 重新生成 YAML 文件", type="primary", use_container_width=True):
+        try:
+            install_yaml = generator.generate_install_config()
+            agent_yaml = generator.generate_agent_config()
+        except Exception as e:
+            st.error(f"生成 YAML 時出錯: {e}")
+            return
+
+        # Preview
+        col1, col2 = st.columns(2)
+        with col1:
+            with st.expander("📄 install-config.yaml (preview)", expanded=True):
+                st.code(install_yaml, language="yaml")
+        with col2:
+            with st.expander("📄 agent-config.yaml (preview)", expanded=True):
+                st.code(agent_yaml, language="yaml")
+
+        # 寫入按鈕
+        col_w1, col_w2 = st.columns(2)
+        with col_w1:
+            if st.button("✅ 確認寫入 install-config.yaml", use_container_width=True):
+                try:
+                    ocp_dir = os.path.dirname(install_config_path)
+                    os.makedirs(ocp_dir, exist_ok=True)
+                    with open(install_config_path, 'w') as f:
+                        f.write(install_yaml)
+                    st.success(f"✅ 已寫入 {install_config_path}")
+                except Exception as e:
+                    st.error(f"寫入失敗: {e}")
+        with col_w2:
+            if st.button("✅ 確認寫入 agent-config.yaml", use_container_width=True):
+                try:
+                    ocp_dir = os.path.dirname(agent_config_path)
+                    os.makedirs(ocp_dir, exist_ok=True)
+                    with open(agent_config_path, 'w') as f:
+                        f.write(agent_yaml)
+                    st.success(f"✅ 已寫入 {agent_config_path}")
+                except Exception as e:
+                    st.error(f"寫入失敗: {e}")

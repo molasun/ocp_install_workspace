@@ -47,7 +47,6 @@ class SetupWizard:
         "mirror-registry-{arch}.tar.gz"
     )
     URL_GRPCURL = "https://github.com/fullstorydev/grpcurl/releases/download/v1.9.3/grpcurl_1.9.3_linux_x86_64.tar.gz"
-    URL_TRIDENT = "https://github.com/NetApp/trident/releases/download/v{ver}/trident-installer-{ver}.tar.gz"
 
     URL_COREOS_ISO_BASE = (
         "https://mirror.openshift.com/pub/openshift-v4/x86_64/dependencies/rhcos/"
@@ -271,8 +270,6 @@ class SetupWizard:
     def _build_download_list(self, config: dict) -> List[tuple]:
         """構建下載列表"""
         v_info = config.get('version_info', {})
-        csi_info = config.get('csi_info', {})
-        
         params = {
             'release': v_info.get('OCP_RELEASE', ''),
             'arch': v_info.get('ARCHITECTURE', ''),
@@ -294,14 +291,6 @@ class SetupWizard:
         coreos_download = self._build_coreos_download(v_info)
         if coreos_download:
             downloads.append(coreos_download)
-        
-        # 條件性添加 Trident
-        if csi_info.get('CSI_TYPE') == "trident":
-            trident_ver = csi_info.get('TRIDENT_INSTALLER', '')
-            if trident_ver:
-                downloads.append(
-                    (self.URL_TRIDENT.format(ver=trident_ver), f"trident-installer-{trident_ver}.tar.gz")
-                )
         
         return downloads
     
