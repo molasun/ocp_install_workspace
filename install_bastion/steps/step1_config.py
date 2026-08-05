@@ -3,6 +3,7 @@ import time
 import os
 from i18n import t
 from managers.yaml_generator import BastionYAMLGenerator
+from managers.base_manager import BaseManager
 
 
 def render_step1_config():
@@ -291,7 +292,7 @@ def _render_yaml_consistency_check(config: dict):
     """檢查 install_source/ocp 下的 YAML 是否與 cluster_config.json 一致"""
     st.subheader("📄 YAML 配置文件一致性檢查")
 
-    home_dir = os.path.expanduser("~")
+    home_dir = BaseManager._get_real_home()
     ocp_dir = os.path.join(home_dir, "install_source", "ocp")
     install_config_path = os.path.join(ocp_dir, "install-config.yaml")
     agent_config_path = os.path.join(ocp_dir, "agent-config.yaml")
