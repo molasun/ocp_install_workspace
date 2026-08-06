@@ -99,18 +99,19 @@ address=/api-int.{cluster_name}.{base_domain}/{bastion_ip}
         self._backup_file('/etc/dnsmasq.conf')
 
         # 5. 設定 dnsmasq 主配置
-        # 先註解掉所有現有的 interface 行
-        self._run_command("sed -i 's/^interface=/#interface=/' /etc/dnsmasq.conf")
-        self._run_command("sed -i 's/^bind-interfaces/#bind-interfaces/' /etc/dnsmasq.conf")
-
-        # 添加正確的 interface 設定
         dnsmasq_conf = '/etc/dnsmasq.conf'
-        with open(dnsmasq_conf, 'a') as f:
-            f.write(f"\n# Added by Bastion Install Wizard\n")
-            f.write(f"interface={interface}\n")
-            f.write(f"bind-interfaces\n")
-            f.write(f"no-hosts\n")
-            f.write(f"addn-hosts=/etc/dnsmasq.d/dns.conf\n")
+        # 檢查現有配置中 interface 是否已是正確的值
+        _, current_conf, _ = self._run_command(f"grep '^interface=' {dnsmasq_conf} 2>/dev/null || true")
+        interface_match = interface in current_conf if current_conf.strip() else False
+
+        if interface_match:
+            self._log(f"dnsmasq.conf 中 interface 已設定為 {interface}，跳過寫入")
+        else:
+            # 只寫入必要行，不註解也不重複追加
+            with open(dnsmasq_conf, 'w') as f:
+                f.write(f"interface={interface}\n")
+                f.write(f"bind-interfaces\n")
+            self._log(f"已寫入 dnsmasq 主配置: interface={interface}")
 
         # 6. 生成並寫入 DNS 配置
         dns_config = self.generate_config()
