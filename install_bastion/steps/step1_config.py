@@ -348,16 +348,24 @@ def _render_yaml_consistency_check(config: dict):
 
 
 def _render_regenerate_button(config, generator, install_config_path, agent_config_path):
-    """渲染重新生成 YAML 的按鈕與 preview"""
+    """渲染重新生成 YAML 的按鈕與 preview
+
+    使用 session_state 緩存生成結果，避免 st.button 點完後 preview 消失。
+    """
     if st.button("🔄 重新生成 YAML 文件", type="primary", use_container_width=True):
         try:
-            install_yaml = generator.generate_install_config()
-            agent_yaml = generator.generate_agent_config()
+            st.session_state['_yaml_install'] = generator.generate_install_config()
+            st.session_state['_yaml_agent'] = generator.generate_agent_config()
+            st.session_state['_yaml_generated'] = True
         except Exception as e:
             st.error(f"生成 YAML 時出錯: {e}")
-            return
+            st.session_state['_yaml_generated'] = False
 
-        # Preview
+    # 顯示 preview + 寫入按鈕（緩存存在時）
+    if st.session_state.get('_yaml_generated'):
+        install_yaml = st.session_state['_yaml_install']
+        agent_yaml = st.session_state['_yaml_agent']
+
         col1, col2 = st.columns(2)
         with col1:
             with st.expander("📄 install-config.yaml (preview)", expanded=True):
@@ -366,25 +374,33 @@ def _render_regenerate_button(config, generator, install_config_path, agent_conf
             with st.expander("📄 agent-config.yaml (preview)", expanded=True):
                 st.code(agent_yaml, language="yaml")
 
-        # 寫入按鈕
         col_w1, col_w2 = st.columns(2)
         with col_w1:
             if st.button("✅ 確認寫入 install-config.yaml", use_container_width=True):
                 try:
-                    ocp_dir = os.path.dirname(install_config_path)
-                    os.makedirs(ocp_dir, exist_ok=True)
+                    os.makedirs(os.path.dirname(install_config_path), exist_ok=True)
                     with open(install_config_path, 'w') as f:
                         f.write(install_yaml)
                     st.success(f"✅ 已寫入 {install_config_path}")
+                    _clear_yaml_session()
+                    st.rerun()
                 except Exception as e:
                     st.error(f"寫入失敗: {e}")
         with col_w2:
             if st.button("✅ 確認寫入 agent-config.yaml", use_container_width=True):
                 try:
-                    ocp_dir = os.path.dirname(agent_config_path)
-                    os.makedirs(ocp_dir, exist_ok=True)
+                    os.makedirs(os.path.dirname(agent_config_path), exist_ok=True)
                     with open(agent_config_path, 'w') as f:
                         f.write(agent_yaml)
                     st.success(f"✅ 已寫入 {agent_config_path}")
+                    _clear_yaml_session()
+                    st.rerun()
                 except Exception as e:
                     st.error(f"寫入失敗: {e}")
+
+
+def _clear_yaml_session():
+    """清除 YAML 生成相關的 session_state"""
+    st.session_state.pop('_yaml_generated', None)
+    st.session_state.pop('_yaml_install', None)
+    st.session_state.pop('_yaml_agent', None)
