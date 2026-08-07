@@ -107,9 +107,12 @@ address=/api-int.{cluster_name}.{base_domain}/{bastion_ip}
         if interface_match:
             self._log(f"dnsmasq.conf 中 interface 已設定為 {interface}，跳過寫入")
         else:
-            # 只寫入必要行，不註解也不重複追加
-            with open(dnsmasq_conf, 'w') as f:
-                f.write(f"interface={interface}\n")
+            # 註解掉舊的 interface / bind-interfaces 行
+            self._run_command("sed -i 's/^interface=/#interface=/' /etc/dnsmasq.conf")
+            self._run_command("sed -i 's/^bind-interfaces/#bind-interfaces/' /etc/dnsmasq.conf")
+            # append 新的設定（保留預設配置）
+            with open(dnsmasq_conf, 'a') as f:
+                f.write(f"\ninterface={interface}\n")
                 f.write(f"bind-interfaces\n")
             self._log(f"已寫入 dnsmasq 主配置: interface={interface}")
 
