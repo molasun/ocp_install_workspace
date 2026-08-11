@@ -52,7 +52,9 @@ class SetupWizard:
         "https://mirror.openshift.com/pub/openshift-v4/x86_64/dependencies/rhcos/"
         "{version}/latest/"
     )
-    COREOS_ISO_FILENAME_TEMPLATE = "rhcos-{version}-x86_64-live-iso.x86_64.iso"
+    # 新格式 (>= 4.19): rhcos-4.20.0-x86_64-live-iso.x86_64.iso
+    # 舊格式 (< 4.19):  rhcos-4.18.27-x86_64-live.x86_64.iso
+    # 正則同時匹配兩種命名，直接從 HTML 提取完整檔名
 
     DEFAULT_GRPCURL_VERSION = "1.9.3" 
     DIR_INSTALL_SOURCE = "install_source"
@@ -314,52 +316,58 @@ class SetupWizard:
     def _build_coreos_download(self, v_info: dict) -> Optional[tuple]:
         """
         構建 CoreOS ISO 下載資訊
-        
-        從 OCP_RELEASE 解析主版本號（如 4.21.8 -> 4.21），
-        並從 mirror 頁面查找最新的 CoreOS 版本號
-        
+
+        從 OCP_RELEASE 解析主版本號，訪問 mirror latest/ 目錄，
+        透過 HTML 解析匹配完整檔名（相容新舊兩種命名格式），
+        直接以匹配到的檔名下載，不再手動拼接。
+
         Returns:
             (url, filename, destination_dir) 或 None
         """
         ocp_release = v_info.get('OCP_RELEASE', '')
-        
+
         # 解析 OCP 主版本號
         match = re.match(r'(\d+\.\d+)', ocp_release)
         if not match:
             log_info(f"無法解析 OCP 版本以獲取 CoreOS ISO: {ocp_release}")
             return None
-        
+
         ocp_major_version = match.group(1)
-        
+
         # 構建 CoreOS mirror URL
         base_url = self.URL_COREOS_ISO_BASE.format(version=ocp_major_version)
-        
-        # 取得最新的 CoreOS 版本號
-        coreos_version = self._get_latest_coreos_version(base_url, ocp_major_version)
-        if not coreos_version:
-            log_error(f"無法取得 CoreOS {ocp_major_version} 的版本資訊")
+
+        # 從 HTML 取得最新 CoreOS 版本的完整檔名
+        result = self._get_latest_coreos_filename(base_url, ocp_major_version)
+        if not result:
+            log_error(f"無法取得 CoreOS {ocp_major_version} 的 ISO 資訊")
             return None
-        
-        # 構建完整下載 URL 和檔名
-        iso_url = base_url + self.COREOS_ISO_FILENAME_TEMPLATE.format(version=coreos_version)
-        iso_filename = self.COREOS_ISO_FILENAME_TEMPLATE.format(version=coreos_version)
-        
+
+        coreos_version, iso_filename = result
+
+        # 構建完整下載 URL
+        iso_url = base_url + iso_filename
+
         # CoreOS ISO 存放到專用目錄
         dest_dir = os.path.join(self.current_dir, self.DIR_COREOS_ISO)
-        
-        log_info(f"CoreOS ISO: {iso_filename}")
+
+        log_info(f"CoreOS ISO ({coreos_version}): {iso_filename}")
         return (iso_url, iso_filename, dest_dir)
 
-    def _get_latest_coreos_version(self, base_url: str, ocp_major_version: str) -> Optional[str]:
+    def _get_latest_coreos_filename(self, base_url: str, ocp_major_version: str) -> Optional[tuple]:
         """
-        從 mirror 頁面取得最新的 CoreOS 版本號
-        
+        從 mirror latest/ 頁面取得最新 CoreOS ISO 的完整檔名與版本號
+
+        一個正則同時匹配新舊兩種 ISO 命名：
+          新格式 (>= 4.19): rhcos-{v}-x86_64-live-iso.x86_64.iso
+          舊格式 (< 4.19):  rhcos-{v}-x86_64-live.x86_64.iso
+
         Args:
-            base_url: CoreOS ISO 基礎 URL
-            ocp_major_version: OCP 主版本號（如 '4.21'），用於備用
-            
+            base_url: CoreOS ISO latest/ 目錄 URL
+            ocp_major_version: OCP 主版本號
+
         Returns:
-            版本號字串（如 '4.21.0'）或 None
+            (version_str, full_filename) 或 None
         """
         try:
             # 使用 curl 取得目錄列表
@@ -376,35 +384,31 @@ class SetupWizard:
                 )
             
             if result.returncode != 0 or not result.stdout.strip():
-                log_error(f"無法存取 CoreOS mirror: {base_url}")
-                # 使用備用版本號
-                fallback = f"{ocp_major_version}.0"
-                log_info(f"使用備用 CoreOS 版本: {fallback}")
-                return fallback
+                log_error(f"無法存取 CoreOS mirror: {base_url}，下載失敗")
+                return None
             
             html_content = result.stdout
             
-            # 從 HTML 中提取 ISO 檔名中的版本號
-            # 匹配格式: rhcos-4.21.0-x86_64-live-iso.x86_64.iso
-            pattern = r'rhcos-(\d+\.\d+\.\d+)-x86_64-live-iso\.x86_64\.iso'
+            # 一個正則匹配新舊兩種 ISO 命名
+            # 新: rhcos-4.20.0-x86_64-live-iso.x86_64.iso
+            # 舊: rhcos-4.18.27-x86_64-live.x86_64.iso
+            # (?:-iso)? 讓中間的 -iso 變為可選
+            pattern = r'(rhcos-(\d+\.\d+\.\d+)-x86_64-live(?:-iso)?\.x86_64\.iso)'
             match = re.search(pattern, html_content)
             
             if match:
-                version = match.group(1)
-                log_info(f"找到 CoreOS 版本: {version}")
-                return version
+                full_filename = match.group(1)  
+                version_str = match.group(2)    
+                log_info(f"從 mirror 匹配到 CoreOS: {full_filename}")
+                return (version_str, full_filename)
             
-            # 備用方案：使用 OCP 主版本號 + .0
-            fallback = f"{ocp_major_version}.0"
-            log_info(f"無法從 mirror 解析版本，使用備用: {fallback}")
-            return fallback
+            # 無法匹配 → 下載失敗
+            log_error(f"無法從 mirror 頁面匹配 CoreOS ISO 檔名，下載失敗")
+            return None
             
-        except subprocess.TimeoutExpired:
-            log_error(f"取得 CoreOS 版本資訊超時: {base_url}")
-            return f"{ocp_major_version}.0"
         except Exception as e:
-            log_error(f"取得 CoreOS 版本資訊失敗: {e}")
-            return f"{ocp_major_version}.0"
+            log_error(f"CoreOS 版本查詢異常: {e}")
+            return None
 
     def download_file(self, url: str, destination_dir: str) -> bool:
         """使用 wget 下載檔案"""
