@@ -146,6 +146,11 @@ def render_step3_cli_packages():
             'icon': '🏗️', 'name': t('step3.task_registry'),
             'detail': 'Podman + Quay Registry',
             'method': 'setup_registry', 'condition': 'registry_configure'
+        },
+        'inject_ca': {
+            'icon': '🔐', 'name': t('step3.task_inject_ca'),
+            'detail': 'additionalTrustBundle',
+            'method': 'inject_ca_to_install_config', 'condition': 'registry_configure'
         }
     }
     

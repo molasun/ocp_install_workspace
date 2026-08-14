@@ -156,6 +156,9 @@ def _render_agent_image_section(config_params: dict):
     st.subheader(t('step4.agent.title'))
     st.markdown(t('step4.agent.desc'))
 
+    # 常駐提醒：VMware 宿主機需設定 disk.EnableUUID
+    st.warning(t('step4.agent.vmware_note'))
+
     sync_result = st.session_state.get('mirror_sync_result')
 
     # 狀態 1：尚未檢查

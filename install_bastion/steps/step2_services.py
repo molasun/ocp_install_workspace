@@ -85,6 +85,13 @@ def render_step2_services():
             'method': 'install_nmstate',
             'manager': 'others_manager',
             'always_run': True
+        },
+        'setup_root_ssh_keys': {
+            'icon': '🔑',
+            'name': t('step2.task_ssh_keys'),
+            'method': 'setup_root_ssh_keys',
+            'manager': 'others_manager',
+            'always_run': True
         }
     }
 

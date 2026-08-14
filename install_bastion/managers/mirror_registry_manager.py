@@ -1,7 +1,22 @@
 import os
 import time
 from typing import Tuple, Optional
+
+import yaml
+
 from .base_manager import BaseManager
+
+
+class _LiteralString(str):
+    """標記需以 | 區塊標量輸出的 YAML 字串（用於多行 PEM 憑證）"""
+    pass
+
+
+def _literal_representer(dumper, data):
+    return dumper.represent_scalar('tag:yaml.org,2002:str', data, style='|')
+
+
+yaml.add_representer(_LiteralString, _literal_representer)
 
 
 class MirrorRegistryManager(BaseManager):
@@ -602,6 +617,70 @@ class MirrorRegistryManager(BaseManager):
         self._run_command(f"sudo cp {ca_path} {ca_target_dir}")
         self._run_command("sudo update-ca-trust")
         self._log("CA 憑證信任完成")
+
+    def inject_ca_to_install_config(self) -> Tuple[bool, str]:
+        """將 Quay CA 憑證內容注入 install-config.yaml 的 additionalTrustBundle
+
+        與安裝流程解耦：需在 mirror-registry 安裝確認成功後才呼叫。
+
+        OpenShift 節點需要信任 Quay 的自簽 CA 才能拉取鏡像，
+        否則會出現 x509: certificate signed by unknown authority。
+
+        Returns:
+            (是否成功, 訊息)
+        """
+        quay_root = self.config.get('quayRoot', '/opt/quay')
+        ca_path = os.path.join(quay_root, 'quay-rootCA', 'rootCA.pem')
+
+        install_config_path = os.path.join(
+            self._get_install_source_dir(), 'ocp', 'install-config.yaml'
+        )
+
+        if not os.path.exists(ca_path):
+            msg = f"找不到 CA 憑證: {ca_path}"
+            self._log(msg, "ERROR")
+            return False, msg
+
+        if not os.path.exists(install_config_path):
+            msg = f"install-config.yaml 不存在: {install_config_path}"
+            self._log(msg, "ERROR")
+            return False, msg
+
+        try:
+            with open(ca_path, 'r') as f:
+                ca_content = f.read().strip()
+        except Exception as e:
+            msg = f"讀取 CA 憑證失敗: {e}"
+            self._log(msg, "ERROR")
+            return False, msg
+
+        if not ca_content:
+            msg = "CA 憑證內容為空"
+            self._log(msg, "ERROR")
+            return False, msg
+
+        try:
+            with open(install_config_path, 'r') as f:
+                config = yaml.safe_load(f) or {}
+
+            # PEM 憑證為多行，用 | 區塊標量輸出以保留換行
+            config['additionalTrustBundle'] = _LiteralString(ca_content)
+
+            with open(install_config_path, 'w') as f:
+                yaml.dump(
+                    config, f,
+                    default_flow_style=False,
+                    allow_unicode=True,
+                    sort_keys=False,
+                )
+
+            msg = "已將 CA 憑證注入 install-config.yaml 的 additionalTrustBundle"
+            self._log(msg)
+            return True, msg
+        except Exception as e:
+            msg = f"注入 CA 憑證失敗: {e}"
+            self._log(msg, "ERROR")
+            return False, msg
 
     # ------------------------------------------------------------------
     # Step 8: 健康檢查
