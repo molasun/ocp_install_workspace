@@ -1,6 +1,9 @@
 import os
 import shutil
 from typing import Tuple
+
+import yaml
+
 from .base_manager import BaseManager
 
 
@@ -19,6 +22,15 @@ class AgentCreateManager(BaseManager):
         """agent create image 的工作目錄（~/{clusterName}）"""
         cluster_name = self.config.get('clusterName', 'ocp4')
         return os.path.join(os.path.expanduser('~'), cluster_name)
+
+    @property
+    def install_mode(self) -> str:
+        """安裝模式：standard / sno / compact"""
+        return self.config.get('mode', 'standard')
+
+    def _is_standard(self) -> bool:
+        """是否為 standard 模式（需 mastersSchedulable=false）"""
+        return self.install_mode == 'standard'
 
     # === 前置檢查 ===
 
@@ -81,6 +93,66 @@ class AgentCreateManager(BaseManager):
         self._log(f"工作目錄準備完成: {work_dir}")
         return True, f"工作目錄已就緒: {work_dir}"
 
+    # === 清空工作目錄 ===
+
+    def _clean_work_dir(self) -> Tuple[bool, str]:
+        """清空 work_dir 內所有檔案內容，確保每次創建都是乾淨目錄"""
+        work_dir = self.work_dir
+        home = os.path.expanduser('~')
+
+        # 安全保護：拒絕清空根目錄、家目錄本身或非家目錄下的路徑
+        if not work_dir or work_dir in ('/', home) or os.path.dirname(work_dir) != home:
+            return False, f"拒絕清空不安全路徑: {work_dir}"
+
+        if os.path.exists(work_dir):
+            try:
+                shutil.rmtree(work_dir)
+                self._log(f"已清空工作目錄: {work_dir}")
+            except Exception as e:
+                return False, f"清空工作目錄失敗: {e}"
+
+        os.makedirs(work_dir, exist_ok=True)
+        return True, f"工作目錄已清空: {work_dir}"
+
+    # === standard 模式：cluster-manifests ===
+
+    def _prepare_standard_manifests(self) -> Tuple[bool, str]:
+        """建立 cluster-manifests 並將 mastersSchedulable 設為 false
+
+        僅 standard 模式需要：worker 獨立成節點時，master 不應調度 workload。
+        sno / compact 由 master 兼任 workload，跳過此步驟。
+        """
+        work_dir = self.work_dir
+        manifests_dir = os.path.join(work_dir, 'manifests')
+
+        # 1. 建立 cluster-manifests
+        cmd = (
+            f"{self.OPENSHIFT_INSTALL_BIN} agent create cluster-manifests "
+            f"--dir {work_dir} --log-level=info"
+        )
+        self._log(f"執行: {cmd}")
+        success, stdout, stderr = self._run_command(cmd, timeout=600)
+        if not success:
+            detail = (stderr or stdout).strip()[:500]
+            return False, f"create cluster-manifests 失敗:\n{detail}"
+
+        # 2. 修改 scheduler 設定
+        scheduler_file = os.path.join(manifests_dir, 'cluster-scheduler-02-config.yml')
+        if not os.path.exists(scheduler_file):
+            return False, f"找不到 scheduler 設定檔: {scheduler_file}"
+
+        try:
+            with open(scheduler_file, 'r') as f:
+                data = yaml.safe_load(f) or {}
+            data.setdefault('spec', {})['mastersSchedulable'] = False
+            with open(scheduler_file, 'w') as f:
+                yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+        except Exception as e:
+            return False, f"修改 scheduler 設定失敗: {e}"
+
+        self._log("已設定 mastersSchedulable: false")
+        return True, "cluster-manifests 已建立並設定 mastersSchedulable=false"
+
     # === 生成 Agent Image ===
 
     def create_image(self) -> Tuple[bool, str]:
@@ -97,10 +169,21 @@ class AgentCreateManager(BaseManager):
         if not ok:
             return False, f"前置檢查失敗:\n{msg}"
 
+        # 每次創建都從乾淨目錄開始
+        ok, msg = self._clean_work_dir()
+        if not ok:
+            return False, msg
+
         # 準備工作目錄
         ok, msg = self.prepare_work_dir()
         if not ok:
             return False, msg
+
+        # standard 模式：先建立 cluster-manifests 並設定 mastersSchedulable=false
+        if self._is_standard():
+            ok, msg = self._prepare_standard_manifests()
+            if not ok:
+                return False, msg
 
         # 執行指令
         cmd = f"{self.OPENSHIFT_INSTALL_BIN} agent create image --dir {work_dir} --log-level=info"

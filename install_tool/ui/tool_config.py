@@ -263,6 +263,12 @@ class ToolConfigUI:
         self.config_manager.save_config(config)
         st.success(t('tool.env.config_saved'))
         
+        # release 變更提示：將清理並重新下載 openshift-install / openshift-client / oc-mirror
+        new_release = config.get('version_info', {}).get('OCP_RELEASE', '')
+        old_release = self.wizard.check_release_changed(new_release)
+        if old_release:
+            st.warning(t('tool.env.release_changed', old=old_release, new=new_release))
+        
         if not self._run_env_prep_step():
             return
         
@@ -412,6 +418,24 @@ class ToolConfigUI:
                     time.sleep(1)
                     st.rerun()
         else:
+            # marketplace 自 OCP 4.22 停止發布：禁用啟動按鈕
+            deprecated = (
+                index_type == 'marketplace'
+                and RegistryManager.is_marketplace_deprecated(
+                    config if config is not None else self.config_manager.get_config()
+                )
+            )
+            if deprecated:
+                st.warning(t('tool.catalog.marketplace_deprecated'))
+                st.button(
+                    t('tool.catalog.start'),
+                    key=f"start_container_btn_{index_type}",
+                    type="primary",
+                    use_container_width=True,
+                    disabled=True,
+                )
+                return
+            
             if st.button(t('tool.catalog.start'), key=f"start_container_btn_{index_type}", type="primary", use_container_width=True):
                 with st.spinner(t('tool.catalog.starting')):
                     if config is None:
@@ -455,6 +479,7 @@ class ToolConfigUI:
         if SessionKeys.SELECTED_INDEXES not in st.session_state:
             st.session_state[SessionKeys.SELECTED_INDEXES] = ['redhat']
         
+        config = self.config_manager.get_config()
         st.markdown(f"**{t('tool.catalog.select_indexes')}**")
         
         cols = st.columns(4)
@@ -462,7 +487,24 @@ class ToolConfigUI:
         
         for i, idx_type in enumerate(index_keys):
             idx_info = RegistryManager.INDEX_TYPES[idx_type]
+            deprecated = (
+                idx_type == 'marketplace'
+                and RegistryManager.is_marketplace_deprecated(config)
+            )
             with cols[i]:
+                # marketplace 自 OCP 4.22 停止發布：強制取消勾選並禁用
+                if deprecated:
+                    if idx_type in st.session_state[SessionKeys.SELECTED_INDEXES]:
+                        st.session_state[SessionKeys.SELECTED_INDEXES].remove(idx_type)
+                    st.checkbox(
+                        idx_info['label'],
+                        value=False,
+                        key=f"idx_chk_{idx_type}",
+                        disabled=True,
+                    )
+                    st.caption(t('tool.catalog.marketplace_deprecated'))
+                    continue
+                
                 is_checked = idx_type in st.session_state[SessionKeys.SELECTED_INDEXES]
                 if st.checkbox(
                     idx_info['label'],

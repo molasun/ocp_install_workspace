@@ -88,6 +88,52 @@ class OthersManager(BaseManager):
 
         return True, "nmstate 已成功安裝"
     
+    def setup_root_ssh_keys(self) -> Tuple[bool, str]:
+        """將 install_source/.ssh 的 id_rsa / id_rsa.pub 部署到 /root/.ssh
+
+        每次都覆寫，因為 /root/.ssh 內既有的密鑰可能與 install_source 內不同。
+        """
+        self._log("部署 SSH 金鑰到 /root/.ssh...")
+
+        ssh_src_dir = os.path.join(self._get_install_source_dir(), '.ssh')
+        id_rsa_src = os.path.join(ssh_src_dir, 'id_rsa')
+        id_rsa_pub_src = os.path.join(ssh_src_dir, 'id_rsa.pub')
+
+        # 前置檢查：源檔案必須存在
+        missing = []
+        if not os.path.exists(id_rsa_src):
+            missing.append('id_rsa')
+        if not os.path.exists(id_rsa_pub_src):
+            missing.append('id_rsa.pub')
+        if missing:
+            msg = (
+                f"找不到 SSH 金鑰來源檔案 ({', '.join(missing)})，"
+                f"請先於 install_tool 生成: {ssh_src_dir}"
+            )
+            self._log(msg, "ERROR")
+            return False, msg
+
+        # 建立 /root/.ssh 並設權限
+        self._run_command("sudo mkdir -p /root/.ssh && sudo chmod 700 /root/.ssh")
+
+        # 每次覆寫（既有密鑰可能與 install_source 內不同）
+        self._run_command(f"sudo cp -f {id_rsa_src} /root/.ssh/id_rsa")
+        self._run_command(f"sudo cp -f {id_rsa_pub_src} /root/.ssh/id_rsa.pub")
+
+        # 設定正確權限（避免 SSH 因權限過寬拒絕使用）
+        self._run_command("sudo chmod 600 /root/.ssh/id_rsa")
+        self._run_command("sudo chmod 644 /root/.ssh/id_rsa.pub")
+
+        # 驗證
+        success, stdout, _ = self._run_command(
+            "sudo test -f /root/.ssh/id_rsa && "
+            "sudo test -f /root/.ssh/id_rsa.pub && echo ok"
+        )
+        if success and "ok" in stdout:
+            self._log("SSH 金鑰已部署至 /root/.ssh (id_rsa / id_rsa.pub)")
+            return True, "SSH 金鑰已部署至 /root/.ssh (id_rsa / id_rsa.pub)"
+        return False, "SSH 金鑰部署後驗證失敗"
+
     def check_system_requirements(self) -> Tuple[bool, str]:
         """檢查系統基本需求"""
         self._log("檢查系統基本需求...")

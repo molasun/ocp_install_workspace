@@ -36,6 +36,9 @@ class RegistryManager:
     DEFAULT_OCP_RELEASE = '4.20.8'
     DEFAULT_PORT = 50051
 
+    # Red Hat Marketplace catalog 自 OCP 4.22 起停止發布
+    MARKETPLACE_DEPRECATED_VERSION = (4, 22)
+
     # === 四種 Operator Index 類型定義 ===
     INDEX_TYPES = {
         'redhat': {
@@ -61,6 +64,21 @@ class RegistryManager:
     }
 
     CONTAINER_NAME_TEMPLATE = "operator-registry-{index_type}-{version}"
+
+    @classmethod
+    def is_marketplace_deprecated(cls, config: dict) -> bool:
+        """判斷 OCP 版本是否已達 marketplace catalog 停止發布的版本
+
+        Red Hat Marketplace catalog 自 OCP 4.22 起停止發布，
+        對應的 redhat-marketplace-index 鏡像 tag 已不存在。
+        """
+        v_info = config.get('version_info', {})
+        ocp_release = v_info.get('OCP_RELEASE', cls.DEFAULT_OCP_RELEASE)
+        match = re.match(r'(\d+)\.(\d+)', ocp_release)
+        if not match:
+            return False
+        major, minor = int(match.group(1)), int(match.group(2))
+        return (major, minor) >= cls.MARKETPLACE_DEPRECATED_VERSION
 
     TIMEOUT_IMAGE_CHECK = 30
     TIMEOUT_PULL = 600

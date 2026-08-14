@@ -1,4 +1,5 @@
 import os
+import glob
 import subprocess
 import json
 import re
@@ -250,6 +251,9 @@ class SetupWizard:
         """下載必要工具"""
         log_info("開始執行 get_tools...")
         
+        # release 變更時先清理與 release 綁定的舊工具
+        self._ensure_tools_aligned(config)
+        
         downloads = self._build_download_list(config)
         tracker = ProgressTracker(len(downloads), progress_callback)
         
@@ -266,8 +270,75 @@ class SetupWizard:
                 return False
             tracker.step()
         
+        # 下載成功後記錄實際下載的 release
+        new_release = config.get('version_info', {}).get('OCP_RELEASE', '')
+        if new_release:
+            self._write_download_state(new_release)
+        
         log_info("get_tools 執行完成")
         return True
+
+    def _ensure_tools_aligned(self, config: dict) -> bool:
+        """檢查 release 是否與已下載工具一致，不一致則清理舊工具"""
+        new_release = config.get('version_info', {}).get('OCP_RELEASE', '')
+        recorded_release = self._read_download_state()
+        
+        if recorded_release and recorded_release == new_release:
+            log_info(f"OCP release 未變更 ({new_release})，沿用既有工具")
+            return False
+        
+        if recorded_release:
+            log_info(f"OCP release 已變更: {recorded_release} -> {new_release}，清理舊工具重新下載")
+        else:
+            log_info(f"無下載記錄 (release={new_release})")
+        
+        removed = self.clean_stale_tools()
+        if removed:
+            log_info(f"已清理舊工具: {', '.join(removed)}")
+        return True
+
+    def clean_stale_tools(self) -> List[str]:
+        """清理與 release 綁定的既有工具檔案（openshift-install / openshift-client / oc-mirror）"""
+        removed = []
+        patterns = [
+            'openshift-client-linux-*',
+            'openshift-install-*',
+            'oc-mirror.*',
+        ]
+        for pattern in patterns:
+            for path in glob.glob(os.path.join(self.install_source_dir, pattern)):
+                try:
+                    os.remove(path)
+                    removed.append(os.path.basename(path))
+                except Exception as e:
+                    log_error(f"移除舊工具失敗: {path}, {e}")
+        return removed
+
+    def get_recorded_release(self) -> Optional[str]:
+        """取得已下載工具的 release 記錄"""
+        return self._read_download_state()
+
+    def check_release_changed(self, new_release: str) -> Optional[str]:
+        """檢查 release 是否變更，若變更回傳舊 release，否則回傳 None"""
+        recorded = self._read_download_state()
+        if recorded and recorded != new_release:
+            return recorded
+        return None
+
+    def _read_download_state(self) -> Optional[str]:
+        """讀取 tool_config.json 中記錄的已下載 release"""
+        data = self._read_json_file(self._tool_config_path(), {})
+        return data.get('download_state', {}).get('release')
+
+    def _write_download_state(self, release: str) -> None:
+        """下載成功後更新 download_state（讀全量→改單字段→寫全量）"""
+        config = self._read_json_file(self._tool_config_path(), {})
+        config.setdefault('download_state', {})['release'] = release
+        self._write_json_file(self._tool_config_path(), config)
+
+    def _tool_config_path(self) -> str:
+        """取得 tool_config.json 路徑"""
+        return os.path.join(self.config_dir, 'tool_config.json')
 
     def _build_download_list(self, config: dict) -> List[tuple]:
         """構建下載列表"""
@@ -458,6 +529,15 @@ class SetupWizard:
         for index_type in selected_indexes:
             from src.registry_manager import RegistryManager
             index_label = RegistryManager.INDEX_TYPES.get(index_type, {}).get('label', index_type)
+
+            # Red Hat Marketplace 自 OCP 4.22 停止發布，跳過該 index
+            if index_type == 'marketplace' and RegistryManager.is_marketplace_deprecated(config):
+                self._notify(
+                    status_callback,
+                    f"⚠️ {index_label} 已於 OCP 4.22 停止發布，跳過"
+                )
+                continue
+
             self._notify(status_callback, f"\n{'='*50}")
             self._notify(status_callback, f"📂 開始查詢 {index_label} ({index_type})")
             self._notify(status_callback, f"{'='*50}")

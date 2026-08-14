@@ -433,6 +433,7 @@ def _render_other_ips(config):
 def _render_network_config(config):
     """渲染 Machine/Cluster/Service Network 及 Network Type 的配置區塊"""
     st.subheader(t('cluster.network_config'))
+    st.info(t('cluster.network_overlap_note'))
     col1, col2 = st.columns(2)
     with col1:
         config['install_env']['MACHINE_NETWORK_CIDR'] = st.text_input(
@@ -505,6 +506,8 @@ def _handle_form_submit(config_manager, config):
         st.error(t('cluster.error_empty_ssh'))
     elif not env.get('REGISTRY_PASSWORD'):
         st.error(t('cluster.error_empty_password'))
+    elif not (env.get('MACHINE_NETWORK_CIDR') or '').strip():
+        st.error(t('cluster.error_empty_machine_cidr'))
     else:
         # 驗證模式相關的節點數量
         mode = env.get('INSTALL_MODE', 'standard')
@@ -539,9 +542,7 @@ def _handle_form_submit(config_manager, config):
         
         tool_config = ConfigManager('tool_config.json').get_config()
         tool_version_info = tool_config.get('version_info', {})
-        for key, value in tool_version_info.items():
-            if key not in config['version_info']:
-                config['version_info'][key] = value
+        config['version_info'].update(tool_version_info)
         
         _sync_node_data(config)
         config_manager.save_config(config)

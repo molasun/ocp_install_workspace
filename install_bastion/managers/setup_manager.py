@@ -85,6 +85,7 @@ class SetupManager:
             'disable_selinux': self.others_manager.disable_selinux,
             'install_nmstate': self.others_manager.install_nmstate,
             'check_system_requirements': self.others_manager.check_system_requirements,
+            'setup_root_ssh_keys': self.others_manager.setup_root_ssh_keys,
             
             # DNS Manager
             'setup_dns': self.dns_manager.install,
@@ -103,6 +104,7 @@ class SetupManager:
             'setup_registry': self.mirror_registry_manager.install,
             'check_registry_installed': self.mirror_registry_manager.check_installed,
             'verify_registry_connection': self.mirror_registry_manager.verify_connection,
+            'inject_ca_to_install_config': self.mirror_registry_manager.inject_ca_to_install_config,
             
             # Install Manager
             'install_packages': self.install_manager.install_packages,
