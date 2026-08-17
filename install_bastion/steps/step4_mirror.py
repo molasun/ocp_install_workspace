@@ -292,6 +292,7 @@ def render_step4_mirror():
     st.markdown("---")
 
     # === 3. 同步指令 ===
+    st.warning(t('step4.podman_login_note'))
     st.subheader(t('step4.sync_title'))
     st.markdown(t('step4.sync_desc'))
 

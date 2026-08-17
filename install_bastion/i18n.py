@@ -61,6 +61,11 @@ TRANSLATIONS = {
         'step1.confirm': '✅ 確認配置，進入下一步',
         'step1.confirm_success': '配置已確認！進入步驟2...',
         'step1.reset': '🔄 重設選項',
+        'step1.save_config': '💾 保存節點與網路配置',
+        'step1.save_config_hint': '可編輯節點 IP / MAC / 裝置，以及 Machine / Cluster / Service 三個 CIDR。保存後會持久化寫回 `config/cluster_config.json`。',
+        'step1.save_config_button': '💾 保存配置到 cluster_config.json',
+        'step1.save_config_success': '✅ 配置已保存至 cluster_config.json',
+        'step1.save_config_failed': '❌ 配置保存失敗',
 
         # === step2_services.py ===
         'step2.header': '🔧 步驟2: 基礎服務安裝',
@@ -174,6 +179,7 @@ TRANSLATIONS = {
         'step4.preview_imageset': '📄 預覽 imageset-config.yaml',
         'step4.all_ready': '🎉 所有必要檔案已就緒！',
         'step4.sync_title': '🚀 執行鏡像同步',
+        'step4.podman_login_note': '⚠️ 需先執行 `podman login` 登入 Mirror Registry，再執行鏡像同步指令。',
         'step4.sync_desc': '請在**終端機**中執行以下命令來開始鏡像同步：',
         'step4.copy_hint': '💡 複製上方命令，在終端機中貼上執行',
         'step4.instructions': '### 📋 使用說明\n1. **複製**上方命令\n2. 在 Bastion 主機上開啟**終端機**\n3. **貼上**命令並執行\n4. 鏡像同步可能需要 **10-60 分鐘**\n5. 若中斷，重新執行相同命令即可**續傳**',
@@ -257,6 +263,11 @@ TRANSLATIONS = {
         'step1.confirm': '✅ Confirm Configuration, Proceed to Next Step',
         'step1.confirm_success': 'Configuration confirmed! Proceeding to Step 2...',
         'step1.reset': '🔄 Reset Options',
+        'step1.save_config': '💾 Save Node & Network Configuration',
+        'step1.save_config_hint': 'You can edit node IP / MAC / device, and the Machine / Cluster / Service CIDRs. Saving persists back to `config/cluster_config.json`.',
+        'step1.save_config_button': '💾 Save Configuration to cluster_config.json',
+        'step1.save_config_success': '✅ Configuration saved to cluster_config.json',
+        'step1.save_config_failed': '❌ Failed to save configuration',
 
         # === step2_services.py ===
         'step2.header': '🔧 Step 2: Basic Services Installation',
@@ -370,6 +381,7 @@ TRANSLATIONS = {
         'step4.preview_imageset': '📄 Preview imageset-config.yaml',
         'step4.all_ready': '🎉 All required files are ready!',
         'step4.sync_title': '🚀 Execute Image Mirroring',
+        'step4.podman_login_note': '⚠️ You must run `podman login` to the Mirror Registry first, before running the mirror command.',
         'step4.sync_desc': 'Run the following command in a **terminal** to start image mirroring:',
         'step4.copy_hint': '💡 Copy the command above and execute in a terminal',
         'step4.instructions': '### 📋 Instructions\n1. **Copy** the command above\n2. Open a **terminal** on the Bastion host\n3. **Paste** and execute the command\n4. Image mirroring may take **10-60 minutes**\n5. If interrupted, re-run the same command to **resume**',

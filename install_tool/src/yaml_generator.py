@@ -3,6 +3,7 @@ import os
 import yaml
 import re
 import base64
+import ipaddress
 
 class LiteralString(str):
     """用於標記需要在 YAML 中使用 | 的字串"""
@@ -41,6 +42,13 @@ def _is_valid_ipv4(ip):
     m = re.match(r'^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$', ip)
     return m and all(int(g) <= 255 for g in m.groups())
 
+def _ip_in_cidr(ip, cidr):
+    """判斷 IPv4 是否屬於指定 CIDR 網段"""
+    try:
+        return ipaddress.ip_address(ip) in ipaddress.ip_network(cidr, strict=False)
+    except ValueError:
+        return False
+
 class YAMLGenerator:
     def __init__(self, config, current_dir):
         self.config = config
@@ -63,19 +71,41 @@ class YAMLGenerator:
         return self.env.get(key, default)
 
     def validate_ips(self):
-        """驗證所有 IP 欄位"""
+        """驗證所有 IP 欄位（格式 + 與 machineNetwork 網段一致性）"""
+        errors = []
+
+        # 1. GATEWAY_IP 必填檢查
+        gateway_ip = (self._get_env('GATEWAY_IP') or '').strip()
+        if not gateway_ip:
+            errors.append("GATEWAY_IP 不能為空")
+        elif not _is_valid_ipv4(gateway_ip):
+            errors.append(f"GATEWAY_IP: {gateway_ip}")
+
+        # 2. 格式驗證：其餘 IP 欄位必須是合法 IPv4
         ip_fields = []
         for prefix, max_i in [("MASTER", 3), ("INFRA", 3), ("WORKER", 10)]:
             for i in range(1, max_i + 1):
                 key = f"{prefix}{i:02d}_IP"
                 if self._get_env(key):
                     ip_fields.append((key, self.env[key]))
-        
+
         for key in ['BASTION_IP', 'BOOTSTRAP_IP']:
             if self._get_env(key):
                 ip_fields.append((key, self.env[key]))
-        
-        return [f"{k}: {v}" for k, v in ip_fields if not _is_valid_ipv4(v)]
+
+        for k, v in ip_fields:
+            if not _is_valid_ipv4(v):
+                errors.append(f"{k}: {v}")
+
+        # 3. 網段驗證：BASTION_IP / GATEWAY_IP 必須與 machineNetwork 同網段
+        machine_cidr = self._get_env('MACHINE_NETWORK_CIDR', '').strip()
+        if machine_cidr and '/' in machine_cidr:
+            for key in ['BASTION_IP', 'GATEWAY_IP']:
+                ip = self._get_env(key)
+                if ip and _is_valid_ipv4(ip) and not _ip_in_cidr(ip, machine_cidr):
+                    errors.append(f"{key}: {ip} 不屬於 machineNetwork 網段 {machine_cidr}")
+
+        return errors
 
     def get_ocp_version_path(self):
         """從 OCP_RELEASE 提取版本號"""
@@ -290,26 +320,6 @@ class YAMLGenerator:
         }
         return self._dump_yaml(config)
     
-    def _build_host_entry(self, hostname, role, ip, mac, interface, device, bastion_ip, gateway_ip):
-        """構建單個 host 條目"""
-        cidr = self._get_env('MACHINE_NETWORK_CIDR')
-        prefix = int(cidr.split('/')[1]) if cidr and '/' in cidr else 24
-        
-        return {
-            "hostname": hostname, "role": role,
-            "interfaces": [{"name": interface, "macAddress": mac.upper()}],
-            "networkConfig": {
-                "interfaces": [{
-                    "name": interface, "type": "ethernet", "state": "up",
-                    "mac-address": mac.upper(),
-                    "ipv4": {"enabled": True, "address": [{"ip": ip, "prefix-length": prefix}], "dhcp": False}
-                }],
-                "dns-resolver": {"config": {"server": [bastion_ip] if bastion_ip else []}},
-                "routes": {"config": [{"destination": "0.0.0.0/0", "next-hop-address": gateway_ip or "", "next-hop-interface": interface, "table-id": 254}]}
-            },
-            "rootDeviceHints": {"deviceName": device}
-        }
-
     def _build_host_entry(self, hostname, role, ip, mac, interface, device, bastion_ip, gateway_ip):
         """構建單個 host 條目"""
         # 計算 prefix-length (從 MACHINE_NETWORK_CIDR 或預設 24)
