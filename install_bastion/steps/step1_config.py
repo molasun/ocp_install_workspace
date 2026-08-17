@@ -4,6 +4,7 @@ import os
 from i18n import t
 from managers.yaml_generator import BastionYAMLGenerator
 from managers.base_manager import BaseManager
+from install_app import persist_host_config
 
 
 def render_step1_config():
@@ -81,7 +82,7 @@ def render_step1_config():
     # === 節點配置（唯讀） ===
     st.subheader(t('step1.node_config'))
     
-    # 輔助函數：渲染節點表格
+    # 輔助函數：渲染節點表格（ip/mac/device 可編輯）
     def render_node_group(title: str, nodes: list, prefix: str):
         if not nodes:
             return
@@ -90,30 +91,27 @@ def render_step1_config():
             cols = st.columns(4)
             with cols[0]:
                 st.text_input(
-                    t('step1.node_name'), 
-                    value=node.get('name', 'N/A'), 
-                    disabled=True, 
+                    t('step1.node_name'),
+                    value=node.get('name', 'N/A'),
+                    disabled=True,
                     key=f"cfg_{prefix}_{idx}_name"
                 )
             with cols[1]:
-                st.text_input(
-                    t('step1.node_ip'), 
-                    value=node.get('ip', 'N/A'), 
-                    disabled=True, 
+                node['ip'] = st.text_input(
+                    t('step1.node_ip'),
+                    value=node.get('ip', ''),
                     key=f"cfg_{prefix}_{idx}_ip"
                 )
             with cols[2]:
-                st.text_input(
-                    t('step1.node_mac'), 
-                    value=node.get('mac', 'N/A'), 
-                    disabled=True, 
+                node['mac'] = st.text_input(
+                    t('step1.node_mac'),
+                    value=node.get('mac', ''),
                     key=f"cfg_{prefix}_{idx}_mac"
                 )
             with cols[3]:
-                st.text_input(
-                    t('step1.node_device'), 
-                    value=node.get('device', 'N/A'), 
-                    disabled=True, 
+                node['device'] = st.text_input(
+                    t('step1.node_device'),
+                    value=node.get('device', ''),
                     key=f"cfg_{prefix}_{idx}_device"
                 )
     
@@ -152,24 +150,21 @@ def render_step1_config():
         col_n1, col_n2 = st.columns(2)
         with col_n1:
             if 'machineNetworkCidr' in net_config:
-                st.text_input(
+                net_config['machineNetworkCidr'] = st.text_input(
                     "Machine Network CIDR", 
                     value=net_config['machineNetworkCidr'], 
-                    disabled=True, 
                     key="cfg_machine_cidr"
                 )
             if 'clusterNetworkCidr' in net_config:
-                st.text_input(
+                net_config['clusterNetworkCidr'] = st.text_input(
                     "Cluster Network CIDR", 
                     value=net_config['clusterNetworkCidr'], 
-                    disabled=True, 
                     key="cfg_cluster_cidr"
                 )
             if 'serviceNetworkCidr' in net_config:
-                st.text_input(
+                net_config['serviceNetworkCidr'] = st.text_input(
                     "Service Network CIDR", 
                     value=net_config['serviceNetworkCidr'], 
-                    disabled=True, 
                     key="cfg_service_cidr"
                 )
         with col_n2:
@@ -245,6 +240,20 @@ def render_step1_config():
             key="opt_registry"
         )
     
+    st.markdown("---")
+
+    # === 保存節點/網路配置（持久化回寫 cluster_config.json） ===
+    st.subheader(t('step1.save_config'))
+    st.caption(t('step1.save_config_hint'))
+    if st.button(t('step1.save_config_button'), key="btn_save_config"):
+        if persist_host_config(config):
+            st.session_state.original_config = config
+            st.success(t('step1.save_config_success'))
+            time.sleep(1)
+            st.rerun()
+        else:
+            st.error(t('step1.save_config_failed'))
+
     st.markdown("---")
 
     # === YAML 一致性檢查 ===
