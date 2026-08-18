@@ -4,7 +4,7 @@ import os
 from i18n import t
 from managers.yaml_generator import BastionYAMLGenerator
 from managers.base_manager import BaseManager
-from install_app import persist_host_config
+from managers.config_persist import persist_host_config
 
 
 def render_step1_config():
