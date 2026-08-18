@@ -52,6 +52,8 @@ def render_step3_cli_packages():
     file_paths = st.session_state.get('file_paths', {})
     install_options = st.session_state.get('install_options', {})
 
+    manager = SetupManager(st.session_state.get('config_params', {}))
+
     info = _get_version_info()
     arch = info['arch']
     rhel = info['rhel']
@@ -119,9 +121,9 @@ def render_step3_cli_packages():
         st.subheader(t('step3.quay_config'))
         col_q1, col_q2 = st.columns(2)
         with col_q1:
-            quay_root = st.text_input(t('step3.quay_root'), value=file_paths.get('quayRoot', '/opt/quay'))
+            quay_root = st.text_input(t('step3.quay_root'), value=file_paths.get('quayRoot', '/opt/quay'), key="cfg_quay_root")
         with col_q2:
-            quay_storage = st.text_input(t('step3.quay_storage'), value=file_paths.get('quayStorage', '/opt/quay-storage'))
+            quay_storage = st.text_input(t('step3.quay_storage'), value=file_paths.get('quayStorage', '/opt/quay-storage'), key="cfg_quay_storage")
     else:
         quay_root = file_paths.get('quayRoot', '/opt/quay')
         quay_storage = file_paths.get('quayStorage', '/opt/quay-storage')
@@ -183,7 +185,6 @@ def render_step3_cli_packages():
                 # 更新檔案路徑到 session state
                 _update_file_paths(file_status, quay_root, quay_storage, install_source_dir, arch, rhel, ocp_release)
                 
-                manager = SetupManager(st.session_state.config_params)
                 _execute_step3_tasks(manager, active_tasks)
                 st.rerun()
 
@@ -218,6 +219,15 @@ def render_step3_cli_packages():
                         st.warning(t('step3.registry_verify_failed'))
             else:
                 st.error(f"{task_name}: {result.get('message', '')}")
+                # 活的重試按鈕：在穩定渲染區提供單任務重試
+                if st.button(t('step3.retry'), key=f"retry_{method}"):
+                    with st.spinner(t('step3.executing', task=task_name)):
+                        retry_success, retry_message = manager.execute_step(method)
+                    st.session_state.step3_results[method] = {
+                        'success': retry_success,
+                        'message': retry_message
+                    }
+                    st.rerun()
         
         if success_count == total_count:
             st.success(t('step3.all_success'))
@@ -278,7 +288,7 @@ def _update_file_paths(file_status, quay_root, quay_storage, install_source_dir,
     st.session_state.config_params.update(new_paths)
 
 def _execute_step3_tasks(manager, active_tasks):
-    """執行步驟3的所有任務"""
+    """執行步驟3的所有任務（同步執行，結果存入 session_state，由結果區統一呈現）"""
     st.session_state.step3_executed = True
     st.session_state.step3_results = {}
     
@@ -291,33 +301,8 @@ def _execute_step3_tasks(manager, active_tasks):
         method = task['method']
         status_text.text(t('step3.executing', task=task_name))
         
-        with st.expander(f"{task_name}", expanded=True):
-            st.info(t('step3.executing_status'))
-            success, message = manager.execute_step(method)
-            
-            if success:
-                st.success(f"✅ {message}")
-            else:
-                st.error(f"❌ {message}")
-                col_r, col_s = st.columns(2)
-                with col_r:
-                    if st.button(t('step3.retry'), key=f"retry_{method}"):
-                        retry_success, retry_message = manager.execute_step(method)
-                        if retry_success:
-                            st.success(f"✅ {retry_message}")
-                            success, message = True, retry_message
-                        else:
-                            st.error(t('step3.retry_failed', msg=retry_message))
-                        st.rerun()
-                with col_s:
-                    if st.button(t('step3.skip'), key=f"skip_{method}"):
-                        st.warning(t('step3.skipped', task=task_name))
-                        st.session_state.step3_results[method] = {
-                            'success': False, 'message': t('step3.skipped', task=message), 'skipped': True
-                        }
-                        continue
-            
-            st.session_state.step3_results[method] = {'success': success, 'message': message}
+        success, message = manager.execute_step(method)
+        st.session_state.step3_results[method] = {'success': success, 'message': message}
         
         progress_bar.progress((i + 1) / total)
         time.sleep(0.3)

@@ -1,3 +1,5 @@
+import copy
+
 import streamlit as st
 import sys
 import os
@@ -325,8 +327,8 @@ def main():
         if st.button(t('app.restart')):
             original_config = st.session_state.get('original_config', {})
             st.session_state.clear()
-            st.session_state.original_config = original_config
-            st.session_state.config_params = original_config
+            st.session_state.original_config = copy.deepcopy(original_config)
+            st.session_state.config_params = copy.deepcopy(original_config)
             st.rerun()
 
 if __name__ == "__main__":

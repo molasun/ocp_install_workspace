@@ -148,7 +148,7 @@ def render_step2_services():
         
         all_success = success_count == total_count
         
-        # 顯示每個步驟的詳細結果
+        # 顯示每個步驟的詳細結果（失敗任務附帶可用的重試按鈕）
         for method, result in results.items():
             # 找到對應的任務名稱
             task_name = method
@@ -161,6 +161,15 @@ def render_step2_services():
                 st.success(f"{task_name}: {result.get('message', '')}")
             else:
                 st.error(f"{task_name}: {result.get('message', '')}")
+                # 活的重試按鈕：在穩定渲染區提供單任務重試
+                if st.button(t('step2.retry_step'), key=f"retry_{method}"):
+                    with st.spinner(t('step2.executing', task=task_name)):
+                        retry_success, retry_message = manager.execute_step(method)
+                    st.session_state.step2_results[method] = {
+                        'success': retry_success,
+                        'message': retry_message
+                    }
+                    st.rerun()
         
         if all_success:
             st.success(t('step2.all_success'))
@@ -204,7 +213,7 @@ def render_step2_services():
                     st.rerun()
 
 def _execute_step2_tasks(manager: SetupManager, active_tasks: list):
-    """執行步驟2的所有任務"""
+    """執行步驟2的所有任務（同步執行，結果存入 session_state，由結果區統一呈現）"""
     st.session_state.step2_executed = True
     st.session_state.step2_results = {}
     
@@ -218,49 +227,13 @@ def _execute_step2_tasks(manager: SetupManager, active_tasks: list):
         method = task['method']
         
         status_text.text(t('step2.executing', task=task_name))
+        success, message = manager.execute_step(method)
         
-        with st.expander(f"{task_name}", expanded=True):
-            st.info(t('step2.executing_status'))
-            
-            # 執行步驟
-            success, message = manager.execute_step(method)
-            
-            if success:
-                st.success(f"✅ {message}")
-            else:
-                st.error(f"❌ {message}")
-                
-                # 提供重試和跳過選項
-                col_r, col_s = st.columns(2)
-                with col_r:
-                    if st.button(t('step2.retry_step'), key=f"retry_{method}"):
-                        # 重新執行此步驟
-                        retry_success, retry_message = manager.execute_step(method)
-                        if retry_success:
-                            st.success(f"✅ {retry_message}")
-                            success = True
-                            message = retry_message
-                        else:
-                            st.error(t('step2.retry_failed', msg=retry_message))
-                        st.rerun()
-                with col_s:
-                    if st.button(t('step2.skip_step'), key=f"skip_{method}"):
-                        st.warning(t('step2.skipped', task=task_name))
-                        # 記錄為跳過（非成功也非失敗）
-                        st.session_state.step2_results[method] = {
-                            'success': False,
-                            'message': t('step2.skipped', task=message),
-                            'skipped': True
-                        }
-                        continue
-            
-            # 記錄結果
-            st.session_state.step2_results[method] = {
-                'success': success,
-                'message': message
-            }
+        st.session_state.step2_results[method] = {
+            'success': success,
+            'message': message
+        }
         
-        # 更新進度條
         progress_bar.progress((i + 1) / total)
         time.sleep(0.3)
     

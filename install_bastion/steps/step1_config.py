@@ -1,3 +1,5 @@
+import copy
+
 import streamlit as st
 import time
 import os
@@ -13,7 +15,12 @@ def render_step1_config():
     st.markdown(t('step1.subtitle'))
     
     config = st.session_state.get('config_params', {})
-    
+
+    # 編輯副本：編輯只改副本，點「保存」才寫回 config_params 與磁盤
+    if 'editing_config' not in st.session_state:
+        st.session_state.editing_config = copy.deepcopy(config)
+    editing = st.session_state.editing_config
+
     # === 基本環境資訊（唯讀） ===
     st.subheader(t('step1.env_info'))
     
@@ -116,7 +123,7 @@ def render_step1_config():
                 )
     
     # Master 節點
-    render_node_group(t('step1.master_nodes'), config.get('master', []), "master")
+    render_node_group(t('step1.master_nodes'), editing.get('master', []), "master")
     
     # Bootstrap 節點
     bootstrap = config.get('bootstrap', {})
@@ -138,13 +145,13 @@ def render_step1_config():
         )
     
     # Worker 節點
-    render_node_group(t('step1.worker_nodes'), config.get('worker', []), "worker")
+    render_node_group(t('step1.worker_nodes'), editing.get('worker', []), "worker")
     
     # Infra 節點
-    render_node_group(t('step1.infra_nodes'), config.get('infra', []), "infra")
+    render_node_group(t('step1.infra_nodes'), editing.get('infra', []), "infra")
     
     # === 網路配置 ===
-    net_config = config.get('networkConfig', {})
+    net_config = editing.get('networkConfig', {})
     if net_config:
         st.subheader(t('step1.network_config'))
         col_n1, col_n2 = st.columns(2)
@@ -246,8 +253,9 @@ def render_step1_config():
     st.subheader(t('step1.save_config'))
     st.caption(t('step1.save_config_hint'))
     if st.button(t('step1.save_config_button'), key="btn_save_config"):
-        if persist_host_config(config):
-            st.session_state.original_config = config
+        if persist_host_config(editing):
+            st.session_state.config_params = copy.deepcopy(editing)
+            st.session_state.original_config = copy.deepcopy(editing)
             st.success(t('step1.save_config_success'))
             time.sleep(1)
             st.rerun()
