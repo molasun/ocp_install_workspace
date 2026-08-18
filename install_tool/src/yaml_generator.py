@@ -97,13 +97,14 @@ class YAMLGenerator:
             if not _is_valid_ipv4(v):
                 errors.append(f"{k}: {v}")
 
-        # 3. 網段驗證：BASTION_IP / GATEWAY_IP 必須與 machineNetwork 同網段
+        # 3. 網段驗證：GATEWAY_IP 必須與 machineNetwork 同網段
+        #    （next-hop-address 需與節點介面 IP 同子網，見官方文件）
+        #    BASTION_IP 為輔助主機，不強制同網段，僅需節點路由可達。
         machine_cidr = self._get_env('MACHINE_NETWORK_CIDR', '').strip()
         if machine_cidr and '/' in machine_cidr:
-            for key in ['BASTION_IP', 'GATEWAY_IP']:
-                ip = self._get_env(key)
-                if ip and _is_valid_ipv4(ip) and not _ip_in_cidr(ip, machine_cidr):
-                    errors.append(f"{key}: {ip} 不屬於 machineNetwork 網段 {machine_cidr}")
+            gw = self._get_env('GATEWAY_IP')
+            if gw and _is_valid_ipv4(gw) and not _ip_in_cidr(gw, machine_cidr):
+                errors.append(f"GATEWAY_IP: {gw} 不屬於 machineNetwork 網段 {machine_cidr}")
 
         return errors
 
